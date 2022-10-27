@@ -1,1 +1,1 @@
-This is my "streamlined" version of `{socceraction}`'s notebooks. I prefer CSVs for storage, so they are used instead of hdf5.
+This is my "streamlined" version of [`socceraction`](https://github.com/ML-KULeuven/socceraction)'s notebooks for data processing. CSVs are used instead of hdf5.
