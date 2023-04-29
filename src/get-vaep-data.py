@@ -18,9 +18,9 @@ import socceraction.xthreat as xthreat
 #%%
 ## globals
 competition_id = 2
-first_season_id, last_season_id = 2020, 2022
-_dir_in = 'raw-data'
-_dir_out = 'processed-data'
+first_season_id, last_season_id = 2023, 2023
+_dir_in = '../data/raw'
+_dir_out = '../data/processed'
 
 #%%
 ## compute from globals
@@ -34,7 +34,7 @@ selected_competitions
 #%%
 def create_dir(dir):
   if not os.path.exists(dir):
-    os.mkdir(dir)
+    os.makedirs(dir)
   return dir
 
 def path_exists(path):
@@ -47,22 +47,22 @@ def generate_path(basename, ext, dir):
   create_dir(dir)
   return os.path.join(dir, f'{str(basename)}.{ext}')
 
-def generate_csv_path(basename, dir=_dir_out):
-  return generate_path(dir=dir, ext='csv', basename=basename)
+def generate_parquet_path(basename, dir=_dir_out):
+  return generate_path(dir=dir, ext='parquet', basename=basename)
 
 def generate_pickle_path(basename, dir=_dir_out):
   return generate_path(dir=dir, ext='pickle', basename=basename)
 
-def do_if_csv_path_not_exists(path, overwrite=False):
+def do_if_parquet_path_not_exists(path, overwrite=False):
   def decorator(f):
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
       if path_exists(path) and not overwrite:
         # print(f'Reading from {path}.')
-        return pd.read_csv(path, index_col=False)
+        return pd.read_parquet(path)
 
       df = f(*args, **kwargs)
-      df.to_csv(path, index=False)
+      df.to_parquet(path, index=False)
       return df
     return wrapper
   return decorator
@@ -91,7 +91,7 @@ def do_if_pickle_path_not_exists(path, overwrite=False):
     return wrapper
   return decorator
 
-@do_if_csv_path_not_exists(path=generate_csv_path('games'))
+@do_if_parquet_path_not_exists(path=generate_parquet_path('games'))
 def get_games(loader):
   games = list(
     loader.games(row.competition_id, row.season_id)
@@ -101,13 +101,13 @@ def get_games(loader):
   return pd.concat(games, sort=True).reset_index(drop=True)
 
 def get_game_teams(loader, game_id):
-  @do_if_csv_path_not_exists(path=generate_csv_path(game_id, dir=os.path.join(_dir_out, 'teams')))
+  @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(_dir_out, 'teams')))
   def f(game_id):
     return loader.teams(game_id)
     
   return f(game_id)
 
-@do_if_csv_path_not_exists(path=generate_csv_path('teams'))
+@do_if_parquet_path_not_exists(path=generate_parquet_path('teams'))
 def get_teams(loader, games):
   res = []
   for game in tqdm.tqdm(list(games.itertuples()), desc='Loading teams by game'):
@@ -116,13 +116,13 @@ def get_teams(loader, games):
   return pd.concat(res).drop_duplicates('team_id').reset_index(drop=True)
 
 def get_game_players(loader, game_id):
-  @do_if_csv_path_not_exists(path=generate_csv_path(game_id, dir=os.path.join(_dir_out, 'players')))
+  @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(_dir_out, 'players')))
   def f(game_id):
     return loader.players(game_id)
     
   return f(game_id)
 
-@do_if_csv_path_not_exists(path=generate_csv_path('players'))
+@do_if_parquet_path_not_exists(path=generate_parquet_path('players'))
 def get_players(loader, games):
   res = []
   for game in tqdm.tqdm(list(games.itertuples()), desc='Loading players by game'):
@@ -131,13 +131,13 @@ def get_players(loader, games):
   return pd.concat(res).reset_index(drop=True)
 
 def get_game_actions(loader, game_id, home_team_id):
-  @do_if_csv_path_not_exists(path=generate_csv_path(game_id, dir=os.path.join(_dir_out, 'actions')))
+  @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(_dir_out, 'actions')))
   def f(events, home_team_id):
     return converter.convert_to_actions(events, home_team_id)
   
   return f(loader.events(game_id), home_team_id)
   
-@do_if_csv_path_not_exists(path=generate_csv_path('actions'))
+@do_if_parquet_path_not_exists(path=generate_parquet_path('actions'))
 def get_actions(loader, games):
   res = []
   for game in tqdm.tqdm(list(games.itertuples()), desc='Loading actions by game'):
@@ -146,14 +146,14 @@ def get_actions(loader, games):
   return pd.concat(res).reset_index(drop=True)
 
 def get_game_actions_atomic(loader, game_id, home_team_id):
-  @do_if_csv_path_not_exists(path=generate_csv_path(game_id, dir=os.path.join(_dir_out, 'actions_atomic')))
+  @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(_dir_out, 'actions_atomic')))
   def f(loader, game_id, home_team_id):
     actions = get_game_actions(loader, game_id=game_id, home_team_id=home_team_id)
     return atomicspadl.convert_to_atomic(actions)
   
   return f(loader, game_id, home_team_id)
 
-@do_if_csv_path_not_exists(path=generate_csv_path('actions_atomic'))
+@do_if_parquet_path_not_exists(path=generate_parquet_path('actions_atomic'))
 def get_actions_atomic(loader, games):
   res = []
   for game in tqdm.tqdm(list(games.itertuples()), desc='Loading atomic actions by game'):
@@ -167,19 +167,19 @@ def _get_game_id(actions):
 def _get_action_id(actions):
   return actions[['action_id']]
 
-@do_if_csv_path_not_exists(path=generate_csv_path('bodyparts'))
+@do_if_parquet_path_not_exists(path=generate_parquet_path('bodyparts'))
 def get_bodyparts():
   return spadl.bodyparts_df()
 
-@do_if_csv_path_not_exists(path=generate_csv_path('results'))
+@do_if_parquet_path_not_exists(path=generate_parquet_path('results'))
 def get_results():
   return spadl.results_df()
 
-@do_if_csv_path_not_exists(path=generate_csv_path('actiontypes'))
+@do_if_parquet_path_not_exists(path=generate_parquet_path('actiontypes'))
 def get_actiontypes():
   return spadl.actiontypes_df()
 
-@do_if_csv_path_not_exists(path=generate_csv_path('actiontypes_atomic'))
+@do_if_parquet_path_not_exists(path=generate_parquet_path('actiontypes_atomic'))
 def get_actiontypes_atomic():
   return atomicspadl.actiontypes_df()
 
@@ -217,14 +217,14 @@ def get_game_gamestates(loader, game_id, home_team_id):
   return f(loader, game_id, home_team_id)
 
 def get_game_gamestate_actions(loader, game_id, home_team_id):
-  @do_if_csv_path_not_exists(path=generate_csv_path(game_id, dir=os.path.join(_dir_out, 'gamestate_actions')))
+  @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(_dir_out, 'gamestate_actions')))
   def f(loader, game_id, home_team_id):
     gamestates = get_game_gamestates(loader=loader, game_id=game_id, home_team_id=home_team_id)
     return pd.DataFrame(gamestates[0])
   
   return f(loader, game_id, home_team_id)
 
-@do_if_csv_path_not_exists(path=generate_csv_path('gamestate_actions'))
+@do_if_parquet_path_not_exists(path=generate_parquet_path('gamestate_actions'))
 def get_gamestate_actions(loader, games):
   res = []
   for game in tqdm.tqdm(list(games.itertuples()), desc='Loading gamestate actions by game'):
@@ -233,7 +233,7 @@ def get_gamestate_actions(loader, games):
   return pd.concat(res).reset_index(drop=True)
 
 def get_game_x(loader, game_id, home_team_id):
-  @do_if_csv_path_not_exists(path=generate_csv_path(game_id, dir=os.path.join(_dir_out, 'x')))
+  @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(_dir_out, 'x')))
   def f(loader, game_id, home_team_id):
     gamestates = get_game_gamestates(loader=loader, game_id=game_id, home_team_id=home_team_id)
     x = pd.concat([fn(gamestates) for fn in _xfns], axis=1)
@@ -241,7 +241,7 @@ def get_game_x(loader, game_id, home_team_id):
   
   return f(loader, game_id, home_team_id)
 
-@do_if_csv_path_not_exists(path=generate_csv_path('x'))
+@do_if_parquet_path_not_exists(path=generate_parquet_path('x'))
 def get_x(loader, games):
   res = []
   for game in tqdm.tqdm(list(games.itertuples()), desc='Loading x by game'):
@@ -271,7 +271,7 @@ def get_game_gamestates_atomic(loader, game_id, home_team_id):
   return f(loader, game_id, home_team_id)
 
 def get_game_x_atomic(loader, game_id, home_team_id):
-  @do_if_csv_path_not_exists(path=generate_csv_path(game_id, dir=os.path.join(_dir_out, 'x_atomic')))
+  @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(_dir_out, 'x_atomic')))
   def f(loader, game_id, home_team_id):
     gamestates_atomic = get_game_gamestates_atomic(loader=loader, game_id=game_id, home_team_id=home_team_id)
     x_atomic = pd.concat([fn(gamestates_atomic) for fn in _xfns_atomic], axis=1)
@@ -279,7 +279,7 @@ def get_game_x_atomic(loader, game_id, home_team_id):
   
   return f(loader, game_id, home_team_id)
 
-@do_if_csv_path_not_exists(path=generate_csv_path('x_atomic'))
+@do_if_parquet_path_not_exists(path=generate_parquet_path('x_atomic'))
 def get_x_atomic(loader, games):
   res = []
   for game in tqdm.tqdm(list(games.itertuples()), desc='Loading x atomic by game'):
@@ -289,7 +289,7 @@ def get_x_atomic(loader, games):
 
 _yfns = [lab.scores, lab.concedes]
 def get_game_y(loader, game_id, home_team_id):
-  @do_if_csv_path_not_exists(path=generate_csv_path(game_id, dir=os.path.join(_dir_out, 'y')))
+  @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(_dir_out, 'y')))
   def f(loader, game_id, home_team_id):
     actions = get_game_actions(loader=loader, game_id=game_id, home_team_id=home_team_id)
     y = pd.concat([fn(spadl.add_names(actions)) for fn in _yfns], axis=1)
@@ -297,7 +297,7 @@ def get_game_y(loader, game_id, home_team_id):
   
   return f(loader, game_id, home_team_id)
 
-@do_if_csv_path_not_exists(path=generate_csv_path('y'))
+@do_if_parquet_path_not_exists(path=generate_parquet_path('y'))
 def get_y(loader, games):
   res = []
   for game in tqdm.tqdm(list(games.itertuples()), desc='Loading y by game'):
@@ -307,7 +307,7 @@ def get_y(loader, games):
 
 _yfns_atomic = [lab_atomic.scores, lab_atomic.concedes]
 def get_game_y_atomic(loader, game_id, home_team_id):
-  @do_if_csv_path_not_exists(path=generate_csv_path(game_id, dir=os.path.join(_dir_out, 'y_atomic')))
+  @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(_dir_out, 'y_atomic')))
   def f(loader, game_id, home_team_id):
     actions_atomic = get_game_actions_atomic(loader=loader, game_id=game_id, home_team_id=home_team_id)
     y_atomic = pd.concat([fn(atomicspadl.add_names(actions_atomic)) for fn in _yfns_atomic], axis=1)
@@ -315,7 +315,7 @@ def get_game_y_atomic(loader, game_id, home_team_id):
   
   return f(loader, game_id, home_team_id)
 
-@do_if_csv_path_not_exists(path=generate_csv_path('y_atomic'))
+@do_if_parquet_path_not_exists(path=generate_parquet_path('y_atomic'))
 def get_y_atomic(loader, games):
   res = []
   for game in tqdm.tqdm(list(games.itertuples()), desc='Loading y atomic by game'):
@@ -344,7 +344,7 @@ def load_model(path_or_buf: str):
     model.w, model.l = model.xT.shape
     return model
 
-@do_if_csv_path_not_exists(path=generate_csv_path('xt'))
+@do_if_parquet_path_not_exists(path=generate_parquet_path('xt'))
 def get_xt(gamestate_actions):
   mov_actions = xthreat.get_successful_move_actions(gamestate_actions)
   xt_model = load_model('https://karun.in/blog/data/open_xt_12x8_v1.json')
@@ -355,7 +355,7 @@ def get_xt(gamestate_actions):
 loader = OptaLoader(
   root=_dir_in,
   parser='whoscored',
-  feeds={'whoscored': '{competition_id}/{season_id}/{game_id}.json'}
+  feeds={'whoscored': '{competition_id}-{season_id}-{game_id}.json'}
 )
 
 games = (
@@ -369,13 +369,15 @@ games.groupby(['season_id']).agg(['count'])
 games.iloc[:3, ]
 
 #%%
-games.iloc[378:383, ]
+# games.iloc[378:383, ]
 
 #%%
 teams = get_teams(loader=loader, games=games)
 players = get_players(loader=loader, games=games)
 
 actions = get_actions(loader=loader, games=games)
+
+#%%
 actions_atomic = get_actions_atomic(loader=loader, games=games)
 
 #%%
