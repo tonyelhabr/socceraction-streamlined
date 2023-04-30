@@ -17,10 +17,11 @@ import socceraction.xthreat as xthreat
 
 #%%
 ## globals
-competition_id = 2
-first_season_id, last_season_id = 2023, 2023
-_dir_in = '../data/raw'
-_dir_out = '../data/processed'
+competition_id = 8
+first_season_id, last_season_id = 2021, 2021
+# _dir_in = '../../whoscraped/data/'
+_dir_in = '../data/raw/'
+_dir_out = f'../../whoscraped/data/{competition_id}/{last_season_id}/processed/'
 
 #%%
 ## compute from globals
@@ -355,7 +356,7 @@ def get_xt(gamestate_actions):
 loader = OptaLoader(
   root=_dir_in,
   parser='whoscored',
-  feeds={'whoscored': '{competition_id}-{season_id}-{game_id}.json'}
+  feeds={'whoscored': '{competition_id}\{season_id}\{game_id}.json'}
 )
 
 games = (
@@ -369,12 +370,10 @@ games.groupby(['season_id']).agg(['count'])
 games.iloc[:3, ]
 
 #%%
-# games.iloc[378:383, ]
-
-#%%
 teams = get_teams(loader=loader, games=games)
 players = get_players(loader=loader, games=games)
 
+#%%
 actions = get_actions(loader=loader, games=games)
 
 #%%

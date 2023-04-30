@@ -1,23 +1,22 @@
-
-library(tidyverse)
+library(readr)
 library(tidymodels)
 library(withr)
 library(parallel)
 library(doParallel)
 library(xgboost)
+library(arrow)
 
 n_cores <- detectCores()
 cores_for_parallel <- ceiling(n_cores * 0.5)
 
-import_csv <- function(x) {
-  read_csv(
-    file.path('processed-data', sprintf('%s.csv', x)), 
-    show_col_types = FALSE
+import_parquet <- function(x, dir = 'data/final') {
+  read_parquet(
+    file.path(dir, paste0(x, '.parquet'))
   )
 }
 
-add_possession_cols <- function(d) {
-  poss_changes <- d |> 
+add_possession_cols <- function(df) {
+  poss_changes <- df |> 
     arrange(game_id, action_id) |> 
     mutate(across(action_id, list(lag1 = lag))) |> 
     mutate(
@@ -58,12 +57,12 @@ import_df <- function(suffix = '') {
     sprintf('%s%s%s', prefix, ifelse(suffix != '', '_', ''), suffix)
   }
   inner_join(
-    import_csv(add_suffix('y')),
-    import_csv(add_suffix('x')) |> select(-matches('[1-3]$')),
+    import_parquet(add_suffix('y')),
+    import_parquet(add_suffix('x')) |> select(-matches('[1-3]$')),
     by = c('game_id', 'action_id')
   ) |> 
     inner_join(
-      import_csv('actions') |> select(game_id, team_id, period_id, action_id),
+      import_parquet('actions') |> select(game_id, team_id, period_id, action_id),
       by = c('game_id', 'action_id')
     ) |> 
     add_possession_cols() |> 
@@ -73,13 +72,6 @@ import_df <- function(suffix = '') {
       game_possession_id = sprintf('%s-%s', game_id, possession_id)
     )
 }
-
-df <- import_df()
-df_atomic <- import_df('atomic')
-games <- import_csv('games')
-
-game_ids_trn <- games |> filter(season_id < 2022) |> pull(game_id)
-game_ids_tst <- games |> filter(season_id == 2022) |> pull(game_id)
 
 split_trn_tst <- function(df) {
   trn <- df |> filter(game_id %in% game_ids_trn)
@@ -93,10 +85,7 @@ split_trn_tst <- function(df) {
   )
 }
 
-split <- df |> split_trn_tst()
-split_atomic <- df |> split_trn_tst()
-
-tune_model <- function(split, target, grid_size = 10) {
+fit_model <- function(split, target) {
   other_target <- setdiff(c('scores', 'concedes'), target)
   rec <- recipe(
     as.formula(sprintf('%s ~ .', target)),
@@ -114,59 +103,42 @@ tune_model <- function(split, target, grid_size = 10) {
     )
   
   spec <- boost_tree(
-    trees = tune(),
-    learn_rate = tune(),
-    mtry = tune(),
-    min_n = tune(),
-    tree_depth = tune(),
-    sample_size = tune(),
-    loss_reduction = tune()
-  ) %>%
-    set_mode('classification') %>%
-    set_engine('xgboost')
+  ) |>
+    set_mode('classification') |>
+    set_engine('xgboost', verbosity = 2)
   
   wf <- workflow(
     preprocessor = rec,
     spec = spec
   )
-  
-  model_params <- parameters(
-    trees(range = c(100L, 2000L)),
-    learn_rate(),
-    finalize(mtry(), split$train),
-    min_n(),
-    tree_depth(range = c(1L, 5L)),
-    sample_size = sample_prop(),
-    loss_reduction()
-  )
-  
-  grid <- grid_latin_hypercube(
-    x = model_params,
-    size = grid_size
-  )
-  
-  cl <- makeForkCluster(cores_for_parallel)
+
+  cl <- makeCluster(cores_for_parallel)
   registerDoParallel(cl)
   
-  tuning_results <- tune_grid(
-    wf,
-    resamples = split$folds,
-    param_info = model_params,
-    grid = grid,
-    metrics = metric_set(roc_auc),
-    control = control_grid(
-      verbose = TRUE,
-      allow_par = TRUE,
-      save_pred = FALSE,
-      save_workflow = FALSE,
-      event_level = 'second',
-      parallel_over = 'everything'
-    )
-  )
+  model <- fit(wf, split$train)
   
   stopCluster(cl)
   
-  tuning_results
+  model
 }
 
-tuning_results_scores_atomic <- split_atomic |> tune_model('scores')
+fit_models <- function(split) {
+  list(
+    'scores' = fit_model(split, 'scores'),
+    'concedes' = fit_model(split, 'concedes')
+  )
+}
+
+# df <- import_df()
+df_atomic <- import_df('atomic')
+games <- import_parquet('games')
+game_ids_trn <- games |> filter(season_id < 2023) |> pull(game_id)
+game_ids_tst <- games |> filter(season_id == 2023) |> pull(game_id)
+# split <- df |> split_trn_tst()
+# split_atomic <- df_atomic |> split_trn_tst()
+split_atomic <- list(
+  train = df_atomic |> filter(game_id %in% game_ids_trn),
+  test = df_atomic |> filter(game_id %in% game_ids_tst)
+)
+
+fits_atomic <- split_atomic |> fit_models()
