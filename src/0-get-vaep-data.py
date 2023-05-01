@@ -20,7 +20,6 @@ import socceraction.xthreat as xthreat
 COMPETITION_ID = 8
 SEASON_ID = 2020
 RAW_DATA_DIR = f'../../whoscraped/data/raw/'
-# RAW_DATA_DIR = '../data/raw/'
 PROCESSED_DATA_DIR = f'../../whoscraped/data/processed/{COMPETITION_ID}/{SEASON_ID}'
 
 #%%

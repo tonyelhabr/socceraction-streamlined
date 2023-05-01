@@ -33,10 +33,20 @@ add_possession_cols <- function(df) {
     group_by(game_id) |> 
     mutate(possession_id = row_number()) |> 
     ungroup()
-  
+
   suppressMessages(
     poss_changes |> 
-      left_join(poss_ids |> select(game_id, action_id, poss_change, possession_id)) |> 
+      left_join(
+        poss_ids |> 
+          select(
+            competition_id,
+            season_id,
+            game_id,
+            action_id,
+            poss_change,
+            possession_id
+          )
+      ) |>
       fill(possession_id) |> 
       group_by(game_id, possession_id) |> 
       mutate(
@@ -48,19 +58,28 @@ add_possession_cols <- function(df) {
   )
 }
 
-import_df <- function(suffix = '') {
+import_xy <- function(suffix = '', games) {
   add_suffix <- function(prefix) {
     sprintf('%s%s%s', prefix, ifelse(suffix != '', '_', ''), suffix)
   }
   inner_join(
     import_parquet(add_suffix('y')),
     import_parquet(add_suffix('x')) |> select(-matches('[1-3]$')),
-    by = c('game_id', 'action_id')
+    by = join_by(game_id, action_id)
   ) |> 
     inner_join(
       import_parquet(add_suffix('actions')) |>
-        select(game_id, team_id, period_id, action_id),
-      by = c('game_id', 'action_id')
+        select(
+          game_id,
+          team_id,
+          period_id,
+          action_id
+        ),
+      by = join_by(game_id, action_id)
+    ) |>
+    inner_join(
+      games |> select(competition_id, season_id, game_id),
+      by = join_by(game_id)
     ) |> 
     add_possession_cols() |> 
     mutate(
@@ -84,7 +103,6 @@ split_train_test <- function(df) {
   )
 }
 
-
 fit_model <- function(split, target, overwrite = FALSE) {
   path <- file.path(FINAL_DATA_DIR, paste0('model_', target, '.rds'))
   if (file.exists(path) & isFALSE(overwrite)) {
@@ -96,13 +114,14 @@ fit_model <- function(split, target, overwrite = FALSE) {
     split$train |> select(-all_of(other_target))
   ) |> 
     update_role(
-      all_of(ID_COLS),
+      all_of(MODEL_ID_COLS),
       new_role = 'id'
     )
   
   spec <- boost_tree(
     trees = 100,
-    learn_rate = 0.01
+    learn_rate = 0.1,
+    tree_depth = 3
   ) |>
     set_mode('classification') |>
     set_engine('xgboost', verbosity = 2)
@@ -123,15 +142,14 @@ fit_model <- function(split, target, overwrite = FALSE) {
   model
 }
 
-fit_models <- function(split) {
+fit_models <- function(split, overwrite = FALSE) {
   list(
-    'scores' = fit_model(split, 'scores'),
-    'concedes' = fit_model(split, 'concedes')
+    'scores' = fit_model(split, target = 'scores', overwrite = overwrite),
+    'concedes' = fit_model(split, target = 'concedes', overwrite = overwrite)
   )
 }
 
 predict_vaep <- function(fits, split) {
-  
   map_dfr(
     c(
       'train',
@@ -154,19 +172,28 @@ predict_vaep <- function(fits, split) {
         mutate(vaep = ovaep - dvaep)
       
       bind_cols(
-        split[[.x]] |> select(all_of(ID_COLS)),
+        split[[.x]] |> select(all_of(MODEL_ID_COLS)),
         vaep
       )
     }
   )
 }
 
-# df <- import_df()
-df_atomic <- import_df('atomic')
+# df <- import_df() ## for non-atomic
 games <- import_parquet('games')
+xy_atomic <- import_xy('atomic', games = games)
 
-split_atomic <- split_train_test(df_atomic)
+split_atomic <- split_train_test(xy_atomic)
 
-fits_atomic <- fit_models(split_atomic)
+fits_atomic <- fit_models(split_atomic, overwrite = TRUE)
 preds_atomic <- predict_vaep(fits_atomic, split_atomic)
 export_parquet(preds_atomic)
+
+## debug ----
+preds_atomic |> arrange(desc(vaep))
+preds_atomic |> 
+  slice_sample(n = 10000) |> 
+  pull(vaep) |> 
+  hist()
+preds_atomic |> filter(is.na(vaep))
+

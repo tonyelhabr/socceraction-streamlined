@@ -4,26 +4,27 @@ library(purrr)
 source(file.path('R', 'helpers.R'))
 
 c(
-  'actions',
-  'actions_atomic',
-  'actiontypes',
-  'actiontypes_atomic',
-  'bodyparts',
-  'games',
-  'players',
-  'results',
+  # 'actions',
+  # 'actions_atomic',
+  # 'actiontypes',
+  # 'actiontypes_atomic',
+  # 'bodyparts',
+  # 'games',
+  # 'players',
+  # 'results',
   'teams',
-  'xt',
-  'x',
-  'x_atomic',
-  'y',
-  'y_atomic'
+  # 'xt',
+  # 'x',
+  # 'x_atomic',
+  # 'y',
+  # 'y_atomic'
+  'players'
 ) |> 
   walk(
     ~{
       paths <- list.files(
         file.path(PROCESSED_DATA_DIR, COMPETITION_ID, SEASON_END_YEARS),
-        pattern = paste0('\\/', .x, '\\.parquet$'),
+        pattern = paste0(.x, '\\.parquet$'),
         full.names = TRUE,
         recursive = TRUE
       )
@@ -56,13 +57,19 @@ players <- players |>
     )
   )
 
+actiontypes <- distinct(actiontypes)
+actiontypes_atomic <- distinct(actiontypes_atomic)
+bodyparts <- distinct(bodyparts)
+teams <- distinct(teams)
+results <- distinct(results)
+
 av <- actions |>
   left_join(
-    actiontypes |> distinct(),
+    actiontypes,
     by = join_by(type_id)
   ) |>
   left_join(
-    bodyparts |> distinct(),
+    bodyparts,
     by = join_by(bodypart_id)
   ) |>
   left_join(
@@ -70,11 +77,11 @@ av <- actions |>
     by = join_by(game_id, team_id, player_id)
   ) |>
   left_join(
-    teams |> distinct(),
+    teams,
     by = join_by(team_id)
   ) |>
   left_join(
-    results |> distinct(),
+    results,
     by = join_by(result_id)
   ) |>
   left_join(
@@ -88,11 +95,11 @@ av <- actions |>
 
 ava <- actions_atomic |>
   left_join(
-    actiontypes_atomic |> distinct(),
+    actiontypes_atomic,
     by = join_by(type_id)
   ) |>
   left_join(
-    bodyparts |> distinct(),
+    bodyparts,
     by = join_by(bodypart_id)
   ) |>
   left_join(
@@ -100,7 +107,7 @@ ava <- actions_atomic |>
     by = join_by(game_id, team_id, player_id)
   ) |>
   left_join(
-    teams |> distinct(),
+    teams,
     by = join_by(team_id)
   ) |>
   left_join(
@@ -108,15 +115,12 @@ ava <- actions_atomic |>
     by = join_by(game_id)
   )
 
-do_export_parquet <- function(name) {
-  df <- get(name)
-  export_parquet(df, name)
-}
-
 c(
   'av',
   'ava',
   'games',
+  'players',
+  'teams',
   'actions',
   'actions_atomic',
   'x',
@@ -124,4 +128,9 @@ c(
   'y',
   'y_atomic'
 ) |> 
-  walk(do_export_parquet)
+  walk(
+    ~{
+      df <- get(name)
+      export_parquet(df, name)
+    }
+  )
