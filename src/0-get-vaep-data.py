@@ -17,20 +17,11 @@ import socceraction.xthreat as xthreat
 
 #%%
 ## globals
-competition_id = 8
-first_season_id, last_season_id = 2021, 2021
-# _dir_in = '../../whoscraped/data/'
-_dir_in = '../data/raw/'
-_dir_out = f'../../whoscraped/data/{competition_id}/{last_season_id}/processed/'
-
-#%%
-## compute from globals
-season_ids = list(range(first_season_id, last_season_id+1))
-selected_competitions = pd.DataFrame.from_dict({
-  'competition_id': [competition_id] * len(season_ids),
-  'season_id': season_ids,
-})
-selected_competitions
+COMPETITION_ID = 8
+SEASON_ID = 2020
+RAW_DATA_DIR = f'../../whoscraped/data/raw/'
+# RAW_DATA_DIR = '../data/raw/'
+PROCESSED_DATA_DIR = f'../../whoscraped/data/processed/{COMPETITION_ID}/{SEASON_ID}'
 
 #%%
 def create_dir(dir):
@@ -48,10 +39,10 @@ def generate_path(basename, ext, dir):
   create_dir(dir)
   return os.path.join(dir, f'{str(basename)}.{ext}')
 
-def generate_parquet_path(basename, dir=_dir_out):
+def generate_parquet_path(basename, dir=PROCESSED_DATA_DIR):
   return generate_path(dir=dir, ext='parquet', basename=basename)
 
-def generate_pickle_path(basename, dir=_dir_out):
+def generate_pickle_path(basename, dir=PROCESSED_DATA_DIR):
   return generate_path(dir=dir, ext='pickle', basename=basename)
 
 def do_if_parquet_path_not_exists(path, overwrite=False):
@@ -102,7 +93,7 @@ def get_games(loader):
   return pd.concat(games, sort=True).reset_index(drop=True)
 
 def get_game_teams(loader, game_id):
-  @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(_dir_out, 'teams')))
+  @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(PROCESSED_DATA_DIR, 'teams')))
   def f(game_id):
     return loader.teams(game_id)
     
@@ -117,7 +108,7 @@ def get_teams(loader, games):
   return pd.concat(res).drop_duplicates('team_id').reset_index(drop=True)
 
 def get_game_players(loader, game_id):
-  @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(_dir_out, 'players')))
+  @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(PROCESSED_DATA_DIR, 'players')))
   def f(game_id):
     return loader.players(game_id)
     
@@ -132,7 +123,7 @@ def get_players(loader, games):
   return pd.concat(res).reset_index(drop=True)
 
 def get_game_actions(loader, game_id, home_team_id):
-  @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(_dir_out, 'actions')))
+  @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(PROCESSED_DATA_DIR, 'actions')))
   def f(events, home_team_id):
     return converter.convert_to_actions(events, home_team_id)
   
@@ -147,7 +138,7 @@ def get_actions(loader, games):
   return pd.concat(res).reset_index(drop=True)
 
 def get_game_actions_atomic(loader, game_id, home_team_id):
-  @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(_dir_out, 'actions_atomic')))
+  @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(PROCESSED_DATA_DIR, 'actions_atomic')))
   def f(loader, game_id, home_team_id):
     actions = get_game_actions(loader, game_id=game_id, home_team_id=home_team_id)
     return atomicspadl.convert_to_atomic(actions)
@@ -209,7 +200,7 @@ _xfns = [
 ]
 
 def get_game_gamestates(loader, game_id, home_team_id): 
-  @do_if_pickle_path_not_exists(path=generate_pickle_path(game_id, dir=os.path.join(_dir_out, 'gamestates')))
+  @do_if_pickle_path_not_exists(path=generate_pickle_path(game_id, dir=os.path.join(PROCESSED_DATA_DIR, 'gamestates')))
   def f(loader, game_id, home_team_id):
     actions = get_game_actions(loader=loader, game_id=game_id, home_team_id=home_team_id)
     gamestates = fs.gamestates(spadl.add_names(actions), 3)
@@ -218,7 +209,7 @@ def get_game_gamestates(loader, game_id, home_team_id):
   return f(loader, game_id, home_team_id)
 
 def get_game_gamestate_actions(loader, game_id, home_team_id):
-  @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(_dir_out, 'gamestate_actions')))
+  @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(PROCESSED_DATA_DIR, 'gamestate_actions')))
   def f(loader, game_id, home_team_id):
     gamestates = get_game_gamestates(loader=loader, game_id=game_id, home_team_id=home_team_id)
     return pd.DataFrame(gamestates[0])
@@ -234,7 +225,7 @@ def get_gamestate_actions(loader, games):
   return pd.concat(res).reset_index(drop=True)
 
 def get_game_x(loader, game_id, home_team_id):
-  @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(_dir_out, 'x')))
+  @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(PROCESSED_DATA_DIR, 'x')))
   def f(loader, game_id, home_team_id):
     gamestates = get_game_gamestates(loader=loader, game_id=game_id, home_team_id=home_team_id)
     x = pd.concat([fn(gamestates) for fn in _xfns], axis=1)
@@ -263,7 +254,7 @@ _xfns_atomic = [
 ]
 
 def get_game_gamestates_atomic(loader, game_id, home_team_id): 
-  @do_if_pickle_path_not_exists(path=generate_pickle_path(game_id, dir=os.path.join(_dir_out, 'gamestates_atomic')))
+  @do_if_pickle_path_not_exists(path=generate_pickle_path(game_id, dir=os.path.join(PROCESSED_DATA_DIR, 'gamestates_atomic')))
   def f(loader, game_id, home_team_id):
     actions_atomic = get_game_actions_atomic(loader=loader, game_id=game_id, home_team_id=home_team_id)
     gamestates_atomic = fs_atomic.gamestates(atomicspadl.add_names(actions_atomic), 2)
@@ -272,7 +263,7 @@ def get_game_gamestates_atomic(loader, game_id, home_team_id):
   return f(loader, game_id, home_team_id)
 
 def get_game_x_atomic(loader, game_id, home_team_id):
-  @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(_dir_out, 'x_atomic')))
+  @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(PROCESSED_DATA_DIR, 'x_atomic')))
   def f(loader, game_id, home_team_id):
     gamestates_atomic = get_game_gamestates_atomic(loader=loader, game_id=game_id, home_team_id=home_team_id)
     x_atomic = pd.concat([fn(gamestates_atomic) for fn in _xfns_atomic], axis=1)
@@ -290,7 +281,7 @@ def get_x_atomic(loader, games):
 
 _yfns = [lab.scores, lab.concedes]
 def get_game_y(loader, game_id, home_team_id):
-  @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(_dir_out, 'y')))
+  @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(PROCESSED_DATA_DIR, 'y')))
   def f(loader, game_id, home_team_id):
     actions = get_game_actions(loader=loader, game_id=game_id, home_team_id=home_team_id)
     y = pd.concat([fn(spadl.add_names(actions)) for fn in _yfns], axis=1)
@@ -308,7 +299,7 @@ def get_y(loader, games):
 
 _yfns_atomic = [lab_atomic.scores, lab_atomic.concedes]
 def get_game_y_atomic(loader, game_id, home_team_id):
-  @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(_dir_out, 'y_atomic')))
+  @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(PROCESSED_DATA_DIR, 'y_atomic')))
   def f(loader, game_id, home_team_id):
     actions_atomic = get_game_actions_atomic(loader=loader, game_id=game_id, home_team_id=home_team_id)
     y_atomic = pd.concat([fn(atomicspadl.add_names(actions_atomic)) for fn in _yfns_atomic], axis=1)
@@ -353,8 +344,16 @@ def get_xt(gamestate_actions):
   return mov_actions[['game_id', 'action_id', 'xt']]
 
 #%%
+## compute from globals
+selected_competitions = pd.DataFrame.from_dict({
+  'competition_id': [COMPETITION_ID],
+  'season_id': [SEASON_ID],
+})
+selected_competitions
+
+#%%
 loader = OptaLoader(
-  root=_dir_in,
+  root=RAW_DATA_DIR,
   parser='whoscored',
   feeds={'whoscored': '{competition_id}\{season_id}\{game_id}.json'}
 )
@@ -365,9 +364,6 @@ games = (
   .reset_index(drop=True)
 )
 games.groupby(['season_id']).agg(['count'])
-
-#%%
-games.iloc[:3, ]
 
 #%%
 teams = get_teams(loader=loader, games=games)
@@ -392,8 +388,4 @@ y_atomic = get_y_atomic(loader=loader, games=games)
 
 #%%
 xt = get_xt(gamestate_actions)
-
-#%%
-# model = xgb.XGBClassifier(n_estimators=100, max_depth=3, learning_rate=0.1, verbosity=2)
-# model.fit(x, y['scores'])
 

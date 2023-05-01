@@ -1,19 +1,15 @@
+library(dplyr)
+library(tidyr)
 library(readr)
-library(tidymodels)
-library(withr)
+library(parsnip)
+library(recipes)
+library(workflows)
 library(parallel)
 library(doParallel)
 library(xgboost)
-library(arrow)
+library(purrr)
 
-n_cores <- detectCores()
-cores_for_parallel <- ceiling(n_cores * 0.5)
-
-import_parquet <- function(x, dir = 'data/final') {
-  read_parquet(
-    file.path(dir, paste0(x, '.parquet'))
-  )
-}
+source(file.path('R', 'helpers.R'))
 
 add_possession_cols <- function(df) {
   poss_changes <- df |> 
@@ -21,7 +17,7 @@ add_possession_cols <- function(df) {
     mutate(across(action_id, list(lag1 = lag))) |> 
     mutate(
       poss_change = case_when(
-        # for some reason i'm having to create this column explicitly, instead of just doing lag(action_id)
+        # for some reason I'm having to create this column explicitly, instead of just doing lag(action_id)
         is.na(action_id_lag1) ~ TRUE, # for first record in data set
         team_id != lag(team_id) ~ TRUE, 
         game_id != lag(game_id) ~ TRUE,
@@ -62,7 +58,8 @@ import_df <- function(suffix = '') {
     by = c('game_id', 'action_id')
   ) |> 
     inner_join(
-      import_parquet('actions') |> select(game_id, team_id, period_id, action_id),
+      import_parquet(add_suffix('actions')) |>
+        select(game_id, team_id, period_id, action_id),
       by = c('game_id', 'action_id')
     ) |> 
     add_possession_cols() |> 
@@ -73,36 +70,39 @@ import_df <- function(suffix = '') {
     )
 }
 
-split_trn_tst <- function(df) {
-  trn <- df |> filter(game_id %in% game_ids_trn)
-  tst <- df |> filter(game_id %in% game_ids_tst)
-  withr::local_seed(42)
-  folds <-  group_vfold_cv(trn, group = 'game_possession_id', v = 5)
+split_train_test <- function(df) {
+  game_ids_train <- games |> filter(season_id < TEST_SEASON_ID) |> pull(game_id)
+  game_ids_test <- games |> filter(season_id == TEST_SEASON_ID) |> pull(game_id)
+  train <- df |> filter(game_id %in% game_ids_train)
+  test <- df |> filter(game_id %in% game_ids_test)
+  # withr::local_seed(42)
+  # folds <-  group_vfold_cv(trn, group = 'game_possession_id', v = 5)
   list(
-    train = trn, 
-    test = tst,
-    folds = folds
+    # folds = folds,
+    train = train, 
+    test = test
   )
 }
 
-fit_model <- function(split, target) {
+
+fit_model <- function(split, target, overwrite = FALSE) {
+  path <- file.path(FINAL_DATA_DIR, paste0('model_', target, '.rds'))
+  if (file.exists(path) & isFALSE(overwrite)) {
+    return(read_rds(path))
+  }
   other_target <- setdiff(c('scores', 'concedes'), target)
   rec <- recipe(
     as.formula(sprintf('%s ~ .', target)),
-    split$train |> select(-.data[[other_target]])
+    split$train |> select(-all_of(other_target))
   ) |> 
     update_role(
-      game_id,
-      action_id,
-      team_id,
-      period_id,
-      possession_id,
-      within_possession_id,
-      game_possession_id,
+      all_of(ID_COLS),
       new_role = 'id'
     )
   
   spec <- boost_tree(
+    trees = 100,
+    learn_rate = 0.01
   ) |>
     set_mode('classification') |>
     set_engine('xgboost', verbosity = 2)
@@ -111,14 +111,15 @@ fit_model <- function(split, target) {
     preprocessor = rec,
     spec = spec
   )
-
+  
+  n_cores <- detectCores()
+  cores_for_parallel <- ceiling(n_cores * 0.5)
   cl <- makeCluster(cores_for_parallel)
   registerDoParallel(cl)
-  
   model <- fit(wf, split$train)
-  
   stopCluster(cl)
   
+  write_rds(model, path)
   model
 }
 
@@ -129,16 +130,43 @@ fit_models <- function(split) {
   )
 }
 
+predict_vaep <- function(fits, split) {
+  
+  map_dfr(
+    c(
+      'train',
+      'test'
+    ),
+    ~{
+      ovaep <- predict(
+        fits_atomic$scores, split[[.x]], type = 'prob'
+      ) |> 
+        select(ovaep = .pred_yes)
+      dvaep <- predict(
+        fits_atomic$concedes, split[[.x]], type = 'prob'
+      ) |> 
+        select(dvaep = .pred_yes)
+      
+      vaep <- bind_cols(
+        ovaep,
+        dvaep
+      ) |> 
+        mutate(vaep = ovaep - dvaep)
+      
+      bind_cols(
+        split[[.x]] |> select(all_of(ID_COLS)),
+        vaep
+      )
+    }
+  )
+}
+
 # df <- import_df()
 df_atomic <- import_df('atomic')
 games <- import_parquet('games')
-game_ids_trn <- games |> filter(season_id < 2023) |> pull(game_id)
-game_ids_tst <- games |> filter(season_id == 2023) |> pull(game_id)
-# split <- df |> split_trn_tst()
-# split_atomic <- df_atomic |> split_trn_tst()
-split_atomic <- list(
-  train = df_atomic |> filter(game_id %in% game_ids_trn),
-  test = df_atomic |> filter(game_id %in% game_ids_tst)
-)
 
-fits_atomic <- split_atomic |> fit_models()
+split_atomic <- split_train_test(df_atomic)
+
+fits_atomic <- fit_models(split_atomic)
+preds_atomic <- predict_vaep(fits_atomic, split_atomic)
+export_parquet(preds_atomic)

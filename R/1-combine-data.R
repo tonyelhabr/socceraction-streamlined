@@ -1,11 +1,8 @@
 library(dplyr)
 library(purrr)
-library(readr)
-library(fs)
-library(arrow)
 
-COMPETITION_ID <- 8
-SEASON_END_YEARS <- 2021:2023
+source(file.path('R', 'helpers.R'))
+
 c(
   'actions',
   'actions_atomic',
@@ -24,10 +21,11 @@ c(
 ) |> 
   walk(
     ~{
-      paths <- dir_ls(
-        file.path('../whoscraped/data/processed', COMPETITION_ID, SEASON_END_YEARS),
-        recurse = TRUE,
-        regexp = paste0('\\/', .x, '\\.parquet$')
+      paths <- list.files(
+        file.path(PROCESSED_DATA_DIR, COMPETITION_ID, SEASON_END_YEARS),
+        pattern = paste0('\\/', .x, '\\.parquet$'),
+        full.names = TRUE,
+        recursive = TRUE
       )
       
       res <- map_dfr(
@@ -110,12 +108,9 @@ ava <- actions_atomic |>
     by = join_by(game_id)
   )
 
-export_parquet <- function(name, dir = 'data/final') {
+do_export_parquet <- function(name) {
   df <- get(name)
-  write_parquet(
-    df,
-    file.path(dir, paste0(name, '.parquet'))
-  )
+  export_parquet(df, name)
 }
 
 c(
@@ -129,4 +124,4 @@ c(
   'y',
   'y_atomic'
 ) |> 
-  walk(export_parquet)
+  walk(do_export_parquet)
