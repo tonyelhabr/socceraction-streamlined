@@ -7,7 +7,9 @@ PROCESSED_DATA_DIR <- '../whoscraped/data/processed'
 FINAL_DATA_DIR <- 'data/final'
 dir.create(FINAL_DATA_DIR, showWarnings = FALSE, recursive = TRUE)
 
-ID_COLS <- c(
+MODEL_ID_COLS <- c(
+  'competition_id',
+  'season_id',
   'game_id',
   'action_id',
   'team_id',
