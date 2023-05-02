@@ -12,7 +12,7 @@ Compared to the notebooks, the big changes are as follows:
 
 ## Scripts
 
-Scripts are meant to be run in the following order:
+Scripts are meant to be run in the following order.
 
 1. `src/0-get-vaep-data.py`
     - This assumes you have Opta event data in the folder specified in `RAW_DATA_DIR`, nested and named in the format specified by `feeds` in `socceraction.spadl.opta.OptaLoader()`.

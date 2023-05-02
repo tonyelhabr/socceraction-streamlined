@@ -18,9 +18,9 @@ import socceraction.xthreat as xthreat
 #%%
 ## globals
 COMPETITION_ID = 8
-SEASON_ID = 2020
-RAW_DATA_DIR = f'../../whoscraped/data/raw/'
-PROCESSED_DATA_DIR = f'../../whoscraped/data/processed/{COMPETITION_ID}/{SEASON_ID}'
+SEASON_ID = 2023
+RAW_DATA_DIR = f'../data/raw/'
+PROCESSED_DATA_DIR = f'../data/processed/{COMPETITION_ID}/{SEASON_ID}'
 
 #%%
 def create_dir(dir):
@@ -173,11 +173,6 @@ def get_actiontypes():
 @do_if_parquet_path_not_exists(path=generate_parquet_path('actiontypes_atomic'))
 def get_actiontypes_atomic():
   return atomicspadl.actiontypes_df()
-
-_bodyparts = get_bodyparts()
-_results = get_results()
-_actiontypes = get_actiontypes()
-_actiontypes_atomic = get_actiontypes_atomic()
 
 _xfns = [
   fs.actiontype,
@@ -388,3 +383,5 @@ y_atomic = get_y_atomic(loader=loader, games=games)
 #%%
 xt = get_xt(gamestate_actions)
 
+
+#%%

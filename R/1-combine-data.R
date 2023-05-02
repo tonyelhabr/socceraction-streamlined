@@ -1,51 +1,53 @@
 library(dplyr)
 library(purrr)
+library(fs)
 
 source(file.path('R', 'helpers.R'))
 
-c(
-  # 'actions',
-  # 'actions_atomic',
-  # 'actiontypes',
-  # 'actiontypes_atomic',
-  # 'bodyparts',
-  # 'games',
-  # 'players',
-  # 'results',
-  'teams',
-  # 'xt',
-  # 'x',
-  # 'x_atomic',
-  # 'y',
-  # 'y_atomic'
-  'players'
-) |> 
-  walk(
+do_import_parquets <- function(x, assign = TRUE) {
+  message(sprintf('Processing %s.', x))
+  paths <- dir_ls(
+    file.path(PROCESSED_DATA_DIR, COMPETITION_ID, SEASON_END_YEARS),
+    regexp = paste0('\\/', x, '\\.parquet$'),
+    recurse = TRUE
+  )
+  message(sprintf('Found %s file paths.', length(paths)))
+  
+  res <- map_dfr(
+    paths,
     ~{
-      paths <- list.files(
-        file.path(PROCESSED_DATA_DIR, COMPETITION_ID, SEASON_END_YEARS),
-        pattern = paste0(.x, '\\.parquet$'),
-        full.names = TRUE,
-        recursive = TRUE
-      )
-      
-      res <- map_dfr(
-        paths,
-        ~{
-          competition_id <- as.integer(basename(dirname(dirname(.x))))
-          season_end_year <- as.integer(basename(dirname(.x)))
-          read_parquet(.x) |> 
-            mutate(
-              across(
-                where(~any(class(.x) == 'integer64')),
-                as.double
-              )
-            )
-        }
-      )
-      assign(value = res, x = .x, envir = .GlobalEnv)
+      competition_id <- as.integer(basename(dirname(dirname(.x))))
+      season_end_year <- as.integer(basename(dirname(.x)))
+      read_parquet(.x) |> 
+        mutate(
+          across(
+            where(~any(class(.x) == 'integer64')),
+            as.double
+          )
+        )
     }
   )
+  
+  if (isFALSE(assign)) {
+    return(res)
+  }
+  
+  assign(value = res, x = x, envir = .GlobalEnv)
+}
+
+c(
+  'actions',
+  'actions_atomic',
+  'actiontypes',
+  'actiontypes_atomic',
+  'bodyparts',
+  'games',
+  'players',
+  'results',
+  'teams',
+  'xt'
+) |> 
+  walk(do_import_parquets)
 
 players <- players |> 
   mutate(
@@ -57,6 +59,7 @@ players <- players |>
     )
   )
 
+## Same across all seasons
 actiontypes <- distinct(actiontypes)
 actiontypes_atomic <- distinct(actiontypes_atomic)
 bodyparts <- distinct(bodyparts)
@@ -118,11 +121,20 @@ ava <- actions_atomic |>
 c(
   'av',
   'ava',
-  'games',
-  'players',
-  'teams',
   'actions',
   'actions_atomic',
+  'games',
+  'players',
+  'teams'
+) |> 
+  walk(
+    ~{
+      df <- get(.x)
+      export_parquet(df, .x)
+    }
+  )
+
+c(
   'x',
   'x_atomic',
   'y',
@@ -130,7 +142,7 @@ c(
 ) |> 
   walk(
     ~{
-      df <- get(name)
-      export_parquet(df, name)
+      res <- do_import_parquets(.x, assign = FALSE)
+      export_parquet(res, .x)
     }
   )

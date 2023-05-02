@@ -1,11 +1,12 @@
 library(arrow)
+library(fs)
 
 COMPETITION_ID <- 8
 SEASON_END_YEARS <- 2021:2023
 TEST_SEASON_ID <- max(SEASON_END_YEARS)
-PROCESSED_DATA_DIR <- '../whoscraped/data/processed'
+PROCESSED_DATA_DIR <- 'data/processed'
 FINAL_DATA_DIR <- 'data/final'
-dir.create(FINAL_DATA_DIR, showWarnings = FALSE, recursive = TRUE)
+dir_create(FINAL_DATA_DIR)
 
 MODEL_ID_COLS <- c(
   'competition_id',

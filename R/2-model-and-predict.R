@@ -8,6 +8,8 @@ library(parallel)
 library(doParallel)
 library(xgboost)
 library(purrr)
+library(butcher)
+library(rlang)
 
 source(file.path('R', 'helpers.R'))
 
@@ -58,17 +60,18 @@ add_possession_cols <- function(df) {
   )
 }
 
+add_suffix <- function(prefix, suffix) {
+  sprintf('%s%s%s', prefix, ifelse(suffix != '', '_', ''), suffix)
+}
+
 import_xy <- function(suffix = '', games) {
-  add_suffix <- function(prefix) {
-    sprintf('%s%s%s', prefix, ifelse(suffix != '', '_', ''), suffix)
-  }
   inner_join(
-    import_parquet(add_suffix('y')),
-    import_parquet(add_suffix('x')) |> select(-matches('[1-3]$')),
+    import_parquet(add_suffix('y', suffix = suffix)),
+    import_parquet(add_suffix('x', suffix = suffix)), #  |> select(-matches('[1-3]$')),
     by = join_by(game_id, action_id)
   ) |> 
     inner_join(
-      import_parquet(add_suffix('actions')) |>
+      import_parquet(add_suffix('actions', suffix = suffix)) |>
         select(
           game_id,
           team_id,
@@ -103,8 +106,13 @@ split_train_test <- function(df) {
   )
 }
 
-fit_model <- function(split, target, overwrite = FALSE) {
-  path <- file.path(FINAL_DATA_DIR, paste0('model_', target, '.rds'))
+convert_atomic_bool_to_suffix <- function(atomic = TRUE) {
+  ifelse(isTRUE(atomic), '_atomic', '')
+}
+
+fit_model <- function(split, target, atomic = TRUE, overwrite = FALSE) {
+  suffix <- convert_atomic_bool_to_suffix(atomic)
+  path <- file.path(FINAL_DATA_DIR, paste0('model_', target, suffix, '.rds'))
   if (file.exists(path) & isFALSE(overwrite)) {
     return(read_rds(path))
   }
@@ -138,18 +146,23 @@ fit_model <- function(split, target, overwrite = FALSE) {
   model <- fit(wf, split$train)
   stopCluster(cl)
   
+  model <- butcher(model)
   write_rds(model, path)
   model
 }
 
-fit_models <- function(split, overwrite = FALSE) {
+fit_models <- function(split, atomic = TRUE, overwrite = FALSE) {
   list(
-    'scores' = fit_model(split, target = 'scores', overwrite = overwrite),
-    'concedes' = fit_model(split, target = 'concedes', overwrite = overwrite)
+    'scores' = fit_model(split, target = 'scores', atomic = atomic, overwrite = overwrite),
+    'concedes' = fit_model(split, target = 'concedes', atomic = atomic, overwrite = overwrite)
   )
 }
 
-predict_vaep <- function(fits, split) {
+predict_vaep <- function(fits, split, atomic = TRUE) {
+  suffix <- convert_atomic_bool_to_suffix(atomic)
+  col_o <- sym(paste0('ovaep', suffix))
+  col_d <- sym(paste0('dvaep', suffix))
+  col_total <- sym(paste0('vaep', suffix))
   map_dfr(
     c(
       'train',
@@ -159,17 +172,17 @@ predict_vaep <- function(fits, split) {
       ovaep <- predict(
         fits_atomic$scores, split[[.x]], type = 'prob'
       ) |> 
-        select(ovaep = .pred_yes)
+        select(!!col_o := .pred_yes)
       dvaep <- predict(
         fits_atomic$concedes, split[[.x]], type = 'prob'
       ) |> 
-        select(dvaep = .pred_yes)
+        select(!!col_d := .pred_yes)
       
       vaep <- bind_cols(
         ovaep,
         dvaep
       ) |> 
-        mutate(vaep = ovaep - dvaep)
+        mutate(!!col_total := !!col_o - !!col_d)
       
       bind_cols(
         split[[.x]] |> select(all_of(MODEL_ID_COLS)),
@@ -185,15 +198,14 @@ xy_atomic <- import_xy('atomic', games = games)
 
 split_atomic <- split_train_test(xy_atomic)
 
-fits_atomic <- fit_models(split_atomic, overwrite = TRUE)
-preds_atomic <- predict_vaep(fits_atomic, split_atomic)
+fits_atomic <- fit_models(split = split_atomic, atomic = TRUE, overwrite = TRUE)
+preds_atomic <- predict_vaep(fits_atomic, split = split_atomic, atomic = TRUE)
 export_parquet(preds_atomic)
 
 ## debug ----
-preds_atomic |> arrange(desc(vaep))
+preds_atomic |> arrange(desc(vaep_atomic))
 preds_atomic |> 
   slice_sample(n = 10000) |> 
-  pull(vaep) |> 
+  pull(vaep_atomic) |> 
   hist()
-preds_atomic |> filter(is.na(vaep))
 

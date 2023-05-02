@@ -1,5 +1,6 @@
 library(dplyr)
 library(tidyr)
+library(purrr)
 
 source(file.path('R', 'helpers.R'))
 
@@ -12,7 +13,8 @@ c(
   'ava',
   'preds_atomic',
   'teams',
-  'players'
+  'players',
+  'games'
 ) |> 
   walk(
     ~{
@@ -143,3 +145,11 @@ vaep_atomic |>
     dvaep_p90,
     vaep_p90
   )
+
+games |> 
+  filter(season_id == 2021) |> 
+  select(game_id) |> 
+  inner_join(
+    players
+  ) |> 
+  count(team_id, sort = TRUE)
