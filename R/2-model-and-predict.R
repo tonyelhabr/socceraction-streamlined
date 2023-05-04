@@ -13,53 +13,6 @@ library(rlang)
 
 source(file.path('R', 'helpers.R'))
 
-add_possession_cols <- function(df) {
-  poss_changes <- df |> 
-    arrange(game_id, action_id) |> 
-    mutate(across(action_id, list(lag1 = lag))) |> 
-    mutate(
-      poss_change = case_when(
-        # for some reason I'm having to create this column explicitly, instead of just doing lag(action_id)
-        is.na(action_id_lag1) ~ TRUE, # for first record in data set
-        team_id != lag(team_id) ~ TRUE, 
-        game_id != lag(game_id) ~ TRUE,
-        period_id != lag(period_id) ~ TRUE,
-        TRUE ~ FALSE
-      ) 
-    ) |> 
-    select(-action_id_lag1) |> 
-    relocate(poss_change, matches('lag1$'))
-  
-  poss_ids <- poss_changes |> 
-    filter(poss_change) |> 
-    group_by(game_id) |> 
-    mutate(possession_id = row_number()) |> 
-    ungroup()
-
-  suppressMessages(
-    poss_changes |> 
-      left_join(
-        poss_ids |> 
-          select(
-            competition_id,
-            season_id,
-            game_id,
-            action_id,
-            poss_change,
-            possession_id
-          )
-      ) |>
-      fill(possession_id) |> 
-      group_by(game_id, possession_id) |> 
-      mutate(
-        within_possession_id = row_number()
-      ) |> 
-      ungroup() |> 
-      select(-poss_change) |> 
-      relocate(matches('possession_id'))
-  )
-}
-
 add_suffix <- function(prefix, suffix) {
   sprintf('%s%s%s', prefix, ifelse(suffix != '', '_', ''), suffix)
 }
@@ -67,7 +20,7 @@ add_suffix <- function(prefix, suffix) {
 import_xy <- function(suffix = '', games) {
   inner_join(
     import_parquet(add_suffix('y', suffix = suffix)),
-    import_parquet(add_suffix('x', suffix = suffix)), #  |> select(-matches('[1-3]$')),
+    import_parquet(add_suffix('x', suffix = suffix)),
     by = join_by(game_id, action_id)
   ) |> 
     inner_join(
@@ -84,11 +37,9 @@ import_xy <- function(suffix = '', games) {
       games |> select(competition_id, season_id, game_id),
       by = join_by(game_id)
     ) |> 
-    add_possession_cols() |> 
     mutate(
       across(c(scores, concedes), ~ifelse(.x, 'yes', 'no') |> factor()),
-      across(where(is.logical), as.integer),
-      game_possession_id = sprintf('%s-%s', game_id, possession_id)
+      across(where(is.logical), as.integer)
     )
 }
 
@@ -97,10 +48,7 @@ split_train_test <- function(df) {
   game_ids_test <- games |> filter(season_id == TEST_SEASON_ID) |> pull(game_id)
   train <- df |> filter(game_id %in% game_ids_train)
   test <- df |> filter(game_id %in% game_ids_test)
-  # withr::local_seed(42)
-  # folds <-  group_vfold_cv(trn, group = 'game_possession_id', v = 5)
   list(
-    # folds = folds,
     train = train, 
     test = test
   )
@@ -126,13 +74,32 @@ fit_model <- function(split, target, atomic = TRUE, overwrite = FALSE) {
       new_role = 'id'
     )
   
+  # spec <- boost_tree(
+  #   trees = 50,
+  #   # learn_rate = 0.1,
+  #   tree_depth = 3
+  # ) |>
+  #   set_mode('classification') |>
+  #   set_engine('xgboost')
+  
   spec <- boost_tree(
-    trees = 100,
-    learn_rate = 0.1,
-    tree_depth = 3
-  ) |>
-    set_mode('classification') |>
-    set_engine('xgboost', verbosity = 2)
+    mode = 'classification',
+    trees = 50,
+    tree_depth = 3,
+    mtry = NULL,
+    learn_rate = NULL,
+    min_n = NULL,
+    loss_reduction = NULL,
+    sample_size = NULL,
+    stop_iter = NULL
+  ) |> 
+    set_engine(
+      'xgboost',
+      stop_window = NULL,
+      stop_val = NULL,
+      num_threads = -3,
+      verbose = 1,
+    )
   
   wf <- workflow(
     preprocessor = rec,
@@ -170,11 +137,11 @@ predict_vaep <- function(fits, split, atomic = TRUE) {
     ),
     ~{
       ovaep <- predict(
-        fits_atomic$scores, split[[.x]], type = 'prob'
+        fits$scores, split[[.x]], type = 'prob'
       ) |> 
         select(!!col_o := .pred_yes)
       dvaep <- predict(
-        fits_atomic$concedes, split[[.x]], type = 'prob'
+        fits$concedes, split[[.x]], type = 'prob'
       ) |> 
         select(!!col_d := .pred_yes)
       
@@ -192,20 +159,18 @@ predict_vaep <- function(fits, split, atomic = TRUE) {
   )
 }
 
-# df <- import_df() ## for non-atomic
 games <- import_parquet('games')
+xy <- import_xy( games = games)
 xy_atomic <- import_xy('atomic', games = games)
 
+split <- split_train_test(xy)
 split_atomic <- split_train_test(xy_atomic)
 
+fits <- fit_models(split = split, atomic = FALSE, overwrite = TRUE)
 fits_atomic <- fit_models(split = split_atomic, atomic = TRUE, overwrite = TRUE)
+
+preds <- predict_vaep(fits, split = split, atomic = FALSE)
 preds_atomic <- predict_vaep(fits_atomic, split = split_atomic, atomic = TRUE)
+
+export_parquet(preds)
 export_parquet(preds_atomic)
-
-## debug ----
-preds_atomic |> arrange(desc(vaep_atomic))
-preds_atomic |> 
-  slice_sample(n = 10000) |> 
-  pull(vaep_atomic) |> 
-  hist()
-
