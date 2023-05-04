@@ -128,6 +128,21 @@
         "bit"
       ]
     },
+    "butcher": {
+      "Package": "butcher",
+      "Version": "0.3.2",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "0804e023949503fee9fab811788deb2f",
+      "Requirements": [
+        "cli",
+        "lobstr",
+        "purrr",
+        "rlang",
+        "tibble",
+        "vctrs"
+      ]
+    },
     "class": {
       "Package": "class",
       "Version": "7.3-20",
@@ -307,6 +322,14 @@
         "iterators"
       ]
     },
+    "fs": {
+      "Package": "fs",
+      "Version": "1.6.2",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "94af08e0aa9675a16fadbb3aaaa90d2a",
+      "Requirements": []
+    },
     "future": {
       "Package": "future",
       "Version": "1.26.1",
@@ -408,17 +431,12 @@
     },
     "hardhat": {
       "Package": "hardhat",
-      "Version": "1.2.0.9000",
-      "Source": "GitHub",
-      "RemoteType": "github",
-      "RemoteHost": "api.github.com",
-      "RemoteRepo": "hardhat",
-      "RemoteUsername": "tidymodels",
-      "RemotePkgRef": "tidymodels/hardhat",
-      "RemoteRef": "HEAD",
-      "RemoteSha": "c2c896cf1141883533ce5d4ad37e80fd6284c92a",
-      "Hash": "bd7c7a8f60c9f206acc8465d6efb486d",
+      "Version": "1.3.0",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "b56b42c50bb7c76a683e8e61f415d828",
       "Requirements": [
+        "cli",
         "glue",
         "rlang",
         "tibble",
@@ -533,6 +551,19 @@
       "Repository": "CRAN",
       "Hash": "0bde42ee282efb18c7c4e63822f5b4f7",
       "Requirements": []
+    },
+    "lobstr": {
+      "Package": "lobstr",
+      "Version": "1.1.2",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "f2a94f8fc9db382a642e965339635ad6",
+      "Requirements": [
+        "cpp11",
+        "crayon",
+        "prettyunits",
+        "rlang"
+      ]
     },
     "lubridate": {
       "Package": "lubridate",
