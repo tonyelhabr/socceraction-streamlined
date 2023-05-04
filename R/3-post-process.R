@@ -4,10 +4,6 @@ library(purrr)
 
 source(file.path('R', 'helpers.R'))
 
-av <- import_parquet('av')
-ava <- import_parquet('ava')
-preds_atomic <- import_parquet('preds_atomic')
-
 c(
   'av',
   'ava',
