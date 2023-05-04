@@ -11,6 +11,7 @@ preds_atomic <- import_parquet('preds_atomic')
 c(
   'av',
   'ava',
+  'preds',
   'preds_atomic',
   'teams',
   'players',
@@ -22,6 +23,13 @@ c(
       assign(value = res, x = .x, envir = .GlobalEnv)
     }
   )
+
+## debug ----
+# preds_atomic |> arrange(desc(vaep_atomic))
+# preds_atomic |> 
+#   slice_sample(n = 10000) |> 
+#   pull(vaep_atomic) |> 
+#   hist()
 
 vaep_atomic <- ava |>
   ## Dummy col so that we don't overwrite the actual col
@@ -63,10 +71,30 @@ vaep_atomic <- ava |>
     .after = atomic_action_id
   ) |> 
   left_join(
-    preds_atomic,
-    by = join_by(game_id, atomic_action_id == action_id, period_id, team_id)
+    preds |> select(-matches('possession')),
+    by = join_by(
+      competition_id,
+      season_id,
+      game_id,
+      action_id,
+      period_id,
+      team_id
+    )
+  ) |> 
+  left_join(
+    preds_atomic |> select(-matches('possession')),
+    by = join_by(
+      competition_id,
+      season_id,
+      game_id,
+      atomic_action_id == action_id,
+      period_id,
+      team_id
+    )
   )
 export_parquet(vaep_atomic)
+rm(list = c('av', 'ava', 'preds', 'preds_atomic'))
+gc()
 
 ## debug ----
 player_games <- players |> 
@@ -105,21 +133,20 @@ players_agg <- player_games |>
         season_id,
         player_id,
         team_id,
-        team_name,
-        team_minutes_played = minutes_played
+        team_name
       ),
     by = join_by(competition_id, season_id, player_id)
   )
 
-vaep_atomic |> 
+vaep_atomic_by_player_season <- vaep_atomic |> 
   # filter(season_id == 2023L) |> 
   group_by(competition_id, season_id, player_id) |> 
   summarize(
+    n_actions = sum(!is.na(action_id)),
     n_actions_atomic = n(),
-    across(matches('vaep'), sum)
+    across(matches('vaep'), sum, na.rm = TRUE)
   ) |> 
   ungroup() |> 
-  arrange(desc(vaep)) |> 
   inner_join(
     players_agg,
     by = join_by(competition_id, season_id, player_id)
@@ -127,8 +154,7 @@ vaep_atomic |>
   mutate(
     across(matches('vaep'), list(p90 = ~.x * 90 / minutes_played))
   ) |> 
-  arrange(desc(vaep_p90)) |> 
-  filter(season_id == 2022) |> 
+  # filter(season_id == 2021) |> 
   select(
     competition_id,
     season_id,
@@ -136,20 +162,22 @@ vaep_atomic |>
     player_name,
     team_id,
     team_name,
+    n_actions,
     n_actions_atomic,
     minutes_played,
+    ## TODO: games played, games started
     ovaep,
     dvaep,
     vaep,
+    ovaep_atomic,
+    dvaep_atomic,
+    vaep_atomic,
     ovaep_p90,
     dvaep_p90,
-    vaep_p90
-  )
-
-games |> 
-  filter(season_id == 2021) |> 
-  select(game_id) |> 
-  inner_join(
-    players
+    vaep_p90,
+    ovaep_atomic_p90,
+    dvaep_atomic_p90,
+    vaep_atomic_p90
   ) |> 
-  count(team_id, sort = TRUE)
+  arrange(desc(vaep_atomic))
+export_parquet(vaep_atomic_by_player_season)
