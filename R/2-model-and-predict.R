@@ -4,8 +4,6 @@ library(readr)
 library(parsnip)
 library(recipes)
 library(workflows)
-library(parallel)
-library(doParallel)
 library(xgboost)
 library(purrr)
 library(butcher)
@@ -97,22 +95,19 @@ fit_model <- function(split, target, atomic = TRUE, overwrite = FALSE) {
       'xgboost',
       stop_window = NULL,
       stop_val = NULL,
-      num_threads = -3,
-      verbose = 1,
+      nthread = -3,
+      verbose = 1
     )
   
   wf <- workflow(
     preprocessor = rec,
     spec = spec
   )
-  
-  n_cores <- detectCores()
-  cores_for_parallel <- ceiling(n_cores * 0.5)
-  cl <- makeCluster(cores_for_parallel)
-  registerDoParallel(cl)
+
   model <- fit(wf, split$train)
-  stopCluster(cl)
-  
+
+  suffix <- convert_atomic_bool_to_suffix(atomic)
+  xgboost::xgb.save(model$fit$fit$fit, file.path(FINAL_DATA_DIR, paste0('model_', target, suffix, '_r.model')))
   model <- butcher(model)
   write_rds(model, path)
   model
@@ -144,17 +139,20 @@ predict_vaep <- function(fits, split, atomic = TRUE) {
         fits$concedes, split[[.x]], type = 'prob'
       ) |> 
         select(!!col_d := .pred_yes)
-      
+
       vaep <- bind_cols(
+        split[[.x]] |> select(scores),
         ovaep,
+        split[[.x]] |> select(concedes),
         dvaep
       ) |> 
         mutate(!!col_total := !!col_o - !!col_d)
       
       bind_cols(
         split[[.x]] |> select(all_of(MODEL_ID_COLS)),
-        vaep
-      )
+        vaep 
+      ) |>
+        mutate(in_test = season_id == TEST_SEASON_ID, .before = 1)
     }
   )
 }
