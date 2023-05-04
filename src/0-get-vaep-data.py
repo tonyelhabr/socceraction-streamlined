@@ -18,7 +18,7 @@ import socceraction.xthreat as xthreat
 #%%
 ## globals
 COMPETITION_ID = 8
-SEASON_ID = 2023
+SEASON_ID = 2020
 RAW_DATA_DIR = f'../data/raw/'
 PROCESSED_DATA_DIR = f'../data/processed/{COMPETITION_ID}/{SEASON_ID}'
 
@@ -44,7 +44,7 @@ def generate_parquet_path(basename, dir=PROCESSED_DATA_DIR):
 def generate_pickle_path(basename, dir=PROCESSED_DATA_DIR):
   return generate_path(dir=dir, ext='pickle', basename=basename)
 
-def do_if_parquet_path_not_exists(path, overwrite=False):
+def do_if_parquet_path_not_exists(path, overwrite=True):
   def decorator(f):
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
@@ -68,7 +68,7 @@ def write_pickle(data, path):
     pickle.dump(data, handle, protocol=pickle.HIGHEST_PROTOCOL)
   return path
 
-def do_if_pickle_path_not_exists(path, overwrite=False):
+def do_if_pickle_path_not_exists(path, overwrite=True):
   def decorator(f):
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
@@ -175,11 +175,8 @@ def get_actiontypes_atomic():
   return atomicspadl.actiontypes_df()
 
 _xfns = [
-  fs.actiontype,
   fs.actiontype_onehot,
-  fs.bodypart,
   fs.bodypart_onehot,
-  fs.result,
   fs.result_onehot,
   fs.goalscore,
   fs.startlocation,
@@ -192,12 +189,13 @@ _xfns = [
   fs.time,
   fs.time_delta
 ]
+_n_prev_actions = 1
 
 def get_game_gamestates(loader, game_id, home_team_id): 
   @do_if_pickle_path_not_exists(path=generate_pickle_path(game_id, dir=os.path.join(PROCESSED_DATA_DIR, 'gamestates')))
   def f(loader, game_id, home_team_id):
     actions = get_game_actions(loader=loader, game_id=game_id, home_team_id=home_team_id)
-    gamestates = fs.gamestates(spadl.add_names(actions), 3)
+    gamestates = fs.gamestates(spadl.add_names(actions), _n_prev_actions)
     return fs.play_left_to_right(gamestates, home_team_id)
   
   return f(loader, game_id, home_team_id)
@@ -251,7 +249,7 @@ def get_game_gamestates_atomic(loader, game_id, home_team_id):
   @do_if_pickle_path_not_exists(path=generate_pickle_path(game_id, dir=os.path.join(PROCESSED_DATA_DIR, 'gamestates_atomic')))
   def f(loader, game_id, home_team_id):
     actions_atomic = get_game_actions_atomic(loader=loader, game_id=game_id, home_team_id=home_team_id)
-    gamestates_atomic = fs_atomic.gamestates(atomicspadl.add_names(actions_atomic), 2)
+    gamestates_atomic = fs_atomic.gamestates(atomicspadl.add_names(actions_atomic), _n_prev_actions)
     return fs_atomic.play_left_to_right(gamestates_atomic, home_team_id)
   
   return f(loader, game_id, home_team_id)
@@ -343,9 +341,7 @@ selected_competitions = pd.DataFrame.from_dict({
   'competition_id': [COMPETITION_ID],
   'season_id': [SEASON_ID],
 })
-selected_competitions
 
-#%%
 loader = OptaLoader(
   root=RAW_DATA_DIR,
   parser='whoscored',
@@ -357,31 +353,17 @@ games = (
   .sort_values(['competition_id', 'game_date', 'game_id'])
   .reset_index(drop=True)
 )
-games.groupby(['season_id']).agg(['count'])
 
-#%%
 teams = get_teams(loader=loader, games=games)
 players = get_players(loader=loader, games=games)
-
-#%%
 actions = get_actions(loader=loader, games=games)
-
-#%%
 actions_atomic = get_actions_atomic(loader=loader, games=games)
-
-#%%
 gamestate_actions = get_gamestate_actions(loader=loader, games=games)
 x = get_x(loader=loader, games=games)
-
-#%%
 x_atomic = get_x_atomic(loader=loader, games=games)
-
-#%%
 y = get_y(loader=loader, games=games)
 y_atomic = get_y_atomic(loader=loader, games=games)
-
-#%%
 xt = get_xt(gamestate_actions)
 
-
 #%%
+
