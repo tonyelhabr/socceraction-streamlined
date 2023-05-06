@@ -67,25 +67,19 @@ vaep_atomic <- ava |>
     .after = atomic_action_id
   ) |> 
   left_join(
-    preds |> select(-matches('possession')),
-    by = join_by(
-      competition_id,
-      season_id,
-      game_id,
-      action_id,
-      period_id,
-      team_id
-    )
+    preds |> select(-in_test),
+    by = join_by(!!!MODEL_ID_COLS)
   ) |> 
   left_join(
-    preds_atomic |> select(-matches('possession')),
+    preds_atomic,
     by = join_by(
-      competition_id,
-      season_id,
-      game_id,
-      atomic_action_id == action_id,
-      period_id,
-      team_id
+      c(setdiff(MODEL_ID_COLS), 'action_id')
+      # competition_id,
+      # season_id,
+      # game_id,
+      # period_id,
+      # team_id,
+      atomic_action_id == action_id
     )
   )
 export_parquet(vaep_atomic)
@@ -117,11 +111,16 @@ players_agg <- player_games |>
   group_by(competition_id, season_id, player_id, player_name) |> 
   summarize(
     n_teams = n_distinct(team_id),
-    n_matches = n(),
-    n_starts = sum(is_starter),
+    starts = sum(is_starter),
     across(minutes_played, sum)
   ) |> 
   ungroup() |> 
+  left_join(
+    player_games |> 
+      filter(minutes_played > 0) |> 
+      count(competition_id, season_id, player_id, name = 'games_played'),
+    by = join_by(competition_id, season_id, player_id)
+  ) |> 
   left_join(
     player_teams |> 
       select(
@@ -136,11 +135,11 @@ players_agg <- player_games |>
 
 vaep_atomic_by_player_season <- vaep_atomic |> 
   # filter(season_id == 2023L) |> 
-  group_by(competition_id, season_id, player_id) |> 
+  group_by(in_test, competition_id, season_id, player_id) |> 
   summarize(
     n_actions = sum(!is.na(action_id)),
     n_actions_atomic = n(),
-    across(matches('vaep'), sum, na.rm = TRUE)
+    across(matches('vaep'), \(x) sum(x, na.rm = TRUE))
   ) |> 
   ungroup() |> 
   inner_join(
@@ -148,10 +147,11 @@ vaep_atomic_by_player_season <- vaep_atomic |>
     by = join_by(competition_id, season_id, player_id)
   ) |> 
   mutate(
-    across(matches('vaep'), list(p90 = ~.x * 90 / minutes_played))
+    across(matches('^vaep'), list(p90 = \(x) x * 90 / minutes_played))
   ) |> 
   # filter(season_id == 2021) |> 
   select(
+    in_test, 
     competition_id,
     season_id,
     player_id,
@@ -162,18 +162,32 @@ vaep_atomic_by_player_season <- vaep_atomic |>
     n_actions_atomic,
     minutes_played,
     ## TODO: games played, games started
-    ovaep,
-    dvaep,
-    vaep,
-    ovaep_atomic,
-    dvaep_atomic,
-    vaep_atomic,
-    ovaep_p90,
-    dvaep_p90,
-    vaep_p90,
-    ovaep_atomic_p90,
-    dvaep_atomic_p90,
-    vaep_atomic_p90
+    vaep_r,
+    vaep_py,
+    vaep_atomic_r,
+    vaep_atomic_py,
+    vaep_r_p90,
+    vaep_py_p90,
+    vaep_atomic_r_p90,
+    vaep_atomic_py_p90
   ) |> 
-  arrange(desc(vaep_atomic))
+  arrange(desc(vaep_atomic_r))
 export_parquet(vaep_atomic_by_player_season)
+
+# vaep_atomic_by_player_season |> arrange(desc(vaep_atomic_r))
+vaep_atomic_by_player_season |> arrange(desc(vaep_atomic_py))
+vaep_atomic_by_player_season |> 
+  group_by(in_test, competition_id, season_id) |> 
+  summarize(
+    across(
+      c(
+        vaep_r,
+        vaep_py,
+        vaep_atomic_r,
+        vaep_atomic_py
+      ),
+      \(x) sum(x, na.rm = TRUE)
+    )
+  ) |> 
+  ungroup() |> 
+  arrange(competition_id, season_id)
