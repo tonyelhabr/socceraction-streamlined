@@ -110,61 +110,66 @@ fit_models <- function(split, atomic = TRUE, overwrite = FALSE) {
     )
 }
 
-read_py_model <- function(atomic, target) {
+.predict_value <- function(fit, df, ...) {
+  x <- .select_x(df)
+  predict(fit, newdata = x, ...)
+}
+
+predict_values <- function(fits, split, atomic = TRUE) {
   suffix <- convert_atomic_bool_to_suffix(atomic)
-  path <- file.path(FINAL_DATA_DIR, paste0('model_', target, suffix, '.model'))
-  xgboost::xgb.load(path)
-}
-
-read_py_models <- function(atomic = TRUE) {
-  list(
-    'scores',
-    'concedes'
-  ) |> 
-    set_names() |> 
-    map(
-      ~{
-        read_py_model(
-          atomic = atomic, 
-          target = .x
+  col_scores <- sym(paste0('pred_scores', suffix, ''))
+  col_concedes <- sym(paste0('pred_concedes', suffix, ''))
+  col_total <- sym(paste0('pred', suffix, ''))
+  map_dfr(
+    c(
+      'train',
+      'test'
+    ),
+    ~{
+      pred_scores <- tibble(
+        !!col_scores := 1 - .predict_value(
+          fits$scores,
+          split[[.x]]
         )
-      }
-    )
+      )
+      
+      pred_concedes <-  tibble(
+        !!col_concedes := 1 - .predict_value(
+          fits$concedes,
+          split[[.x]]
+        )
+      )
+
+      vaep <- bind_cols(
+        split[[.x]] |> select(scores),
+        pred_scores,
+        split[[.x]] |> select(concedes),
+        pred_concedes
+      ) |> 
+        mutate(
+          !!col_total := !!col_scores - !!col_concedes
+        )
+      
+      bind_cols(
+        split[[.x]] |> select(all_of(MODEL_ID_COLS)),
+        vaep 
+      ) |>
+        mutate(
+          in_test = season_id == TEST_SEASON_ID, 
+          .before = 1
+        )
+    }
+  )
 }
 
-.predict_vaep <- function(fit, df, x = NULL) {
-  if (is.null(x)) {
-    x <- .select_x(df)
-  }
-  predict(fit, newdata = x)
-}
-
-.summarize_vaep_pred_contrib <- function(fit, df, target, atomic = TRUE, n = 10000, seed = 42) {
+.summarize_pred_contrib <- function(fit, df, n = 50000, seed = 42) {
   withr::local_seed(seed)
   df <- slice_sample(df, n = n)
-  x <- .select_x(df)
-  suffix <- convert_atomic_bool_to_suffix(atomic)
-  col_pred <- sym('.pred')
-  # preds <- tibble(
-  #   !!col_pred := 1 - .predict_vaep(fit, x = x)
-  # )
-  
-  contrib <- predict(fit, x, predcontrib = TRUE) |>
+
+  contrib <- .predict_value(fit, df, predcontrib = TRUE) |>
     as.data.frame() |>
     as_tibble() |>
     rename(baseline = BIAS)
-  
-  # feature_values <- x |> 
-  #   as.data.frame() |> 
-  #   mutate(
-  #     across(everything(), scale)
-  #   ) |> 
-  #   pivot_longer(
-  #     everything(),
-  #     names_to = 'feature',
-  #     values_to = 'feature_value'
-  #   ) |> 
-  #   as_tibble()
   
   long_contrib <- contrib |> 
     pivot_longer(
@@ -186,73 +191,26 @@ read_py_models <- function(atomic = TRUE) {
     arrange(contrib_value_rank)
 }
 
-predict_vaep <- function(fits_r, fits_py, split, atomic = TRUE) {
-  suffix <- convert_atomic_bool_to_suffix(atomic)
-  col_scores_r <- sym(paste0('pred_scores', suffix, '_r'))
-  col_concedes_r <- sym(paste0('pred_concedes', suffix, '_r'))
-  col_total_r <- sym(paste0('pred', suffix, '_r'))
-  col_scores_py <- sym(paste0('pred_scores', suffix, '_py'))
-  col_concedes_py <- sym(paste0('pred_concedes', suffix, '_py'))
-  col_total_py <- sym(paste0('pred', suffix, '_py'))
-  map_dfr(
-    c(
-      'train',
-      'test'
-    ),
-    ~{
-      pred_scores_r <- tibble(
-        !!col_scores_r := 1 - .predict_vaep(
-          fits_r$scores,
-          split[[.x]]
-        )
-      )
-      
-      pred_concedes_r <-  tibble(
-        !!col_concedes_r := 1 - .predict_vaep(
-          fits_r$concedes,
-          split[[.x]]
-        )
-      )
-      
-      pred_scores_py <- tibble(
-        !!col_scores_py := .predict_vaep(
-          fits_py$scores,
-          split[[.x]]
-        )
-      )
-      
-      pred_concedes_py <- tibble(
-        !!col_concedes_py := .predict_vaep(
-          fits_py$concedes,
-          split[[.x]]
-        )
-      )
-      
-      vaep <- bind_cols(
-        split[[.x]] |> select(scores),
-        pred_scores_r,
-        pred_scores_py,
-        split[[.x]] |> select(concedes),
-        pred_concedes_r,
-        pred_concedes_py
-      ) |> 
-        mutate(
-          !!col_total_r := !!col_scores_r - !!col_concedes_r,
-          !!col_total_py := !!col_scores_py - !!col_concedes_py
-        )
-      
-      bind_cols(
-        split[[.x]] |> select(all_of(MODEL_ID_COLS)),
-        vaep 
-      ) |>
-        mutate(
-          in_test = season_id == TEST_SEASON_ID, 
-          .before = 1
-        )
-    }
-  )
+summarize_pred_contrib <- function(fits, df) {
+  list(
+    'scores',
+    'concedes'
+  ) |> 
+    map_dfr(
+      ~{
+        .summarize_pred_contrib(
+          fit = fits[[.x]], 
+          df = df
+        ) |> 
+          mutate(
+            side = .x,
+            .before = 1
+          )
+      }
+    )
 }
 
+## main ----
 games <- import_parquet('games')
 xy <- import_xy( games = games)
 xy_atomic <- import_xy('atomic', games = games)
@@ -260,31 +218,39 @@ xy_atomic <- import_xy('atomic', games = games)
 split <- split_train_test(xy)
 split_atomic <- split_train_test(xy_atomic)
 
-fits_r <- fit_models(split = split, atomic = FALSE, overwrite = TRUE)
-fits_atomic_r <- fit_models(split = split_atomic, atomic = TRUE, overwrite = TRUE)
+fits <- fit_models(
+  split = split, 
+  atomic = FALSE, 
+  overwrite = TRUE
+)
+fits_atomic <- fit_models(
+  split = split_atomic, 
+  atomic = TRUE,
+  overwrite = TRUE
+)
 
-fits_py <- read_py_models(atomic = FALSE)
-fits_atomic_py <- read_py_models(atomic = TRUE)
-
-preds <- predict_vaep(
-  fits_r = fits_r, 
-  fits_py = fits_py, 
+preds <- predict_values(
+  fits = fits, 
   split = split, 
   atomic = FALSE
 )
-preds_atomic <- predict_vaep(
-  fits_r = fits_atomic_r, 
-  fits_py = fits_atomic_py, 
+preds_atomic <- predict_values(
+  fits = fits_atomic, 
   split = split_atomic, 
   atomic = TRUE
 )
 
+contrib <- summarize_pred_contrib(
+  fits = fits,
+  df = split$test
+)
+
+contrib_atomic <- summarize_pred_contrib(
+  fits = fits_atomic,
+  df = split_atomic$test
+)
+
 export_parquet(preds)
 export_parquet(preds_atomic)
-
-## debug ----
-# preds_atomic |> 
-#   mutate(
-#     d = vaep_atomic_r - vaep_atomic_py
-#   ) |> 
-#   arrange(desc(d))
+export_parquet(contrib)
+export_parquet(contrib_atomic)

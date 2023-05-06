@@ -1,4 +1,3 @@
 pandas==1.5.3
 tqdm==4.65.0
 socceraction==1.2.3
-xgboost==1.7.5
