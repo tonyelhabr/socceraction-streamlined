@@ -1,13 +1,11 @@
 library(dplyr)
 library(tidyr)
 library(readr)
-library(parsnip)
-library(recipes)
-library(workflows)
 library(xgboost)
 library(purrr)
-library(butcher)
 library(rlang)
+library(withr)
+library(forcats)
 
 source(file.path('R', 'helpers.R'))
 
@@ -56,103 +54,201 @@ convert_atomic_bool_to_suffix <- function(atomic = TRUE) {
   ifelse(isTRUE(atomic), '_atomic', '')
 }
 
+df_to_mat <- function(df) {
+  model.matrix(
+    ~.+0,
+    data = model.frame(
+      ~.+0,
+      df,
+      na.action = na.pass
+    )
+  )
+}
+
+.select_x <- function(df) {
+  df |> 
+    select(-c(scores, concedes), -all_of(MODEL_ID_COLS)) |> 
+    df_to_mat()
+}
+
 fit_model <- function(split, target, atomic = TRUE, overwrite = FALSE) {
   suffix <- convert_atomic_bool_to_suffix(atomic)
-  path <- file.path(FINAL_DATA_DIR, paste0('model_', target, suffix, '.rds'))
+  path <- file.path(FINAL_DATA_DIR, paste0('model_', target, suffix, '_r.model'))
   if (file.exists(path) & isFALSE(overwrite)) {
-    return(read_rds(path))
+    return(xgboost::xgb.load(path))
   }
-  other_target <- setdiff(c('scores', 'concedes'), target)
-  rec <- recipe(
-    as.formula(sprintf('%s ~ .', target)),
-    split$train |> select(-all_of(other_target))
-  ) |> 
-    update_role(
-      all_of(MODEL_ID_COLS),
-      new_role = 'id'
-    )
-  
-  # spec <- boost_tree(
-  #   trees = 50,
-  #   # learn_rate = 0.1,
-  #   tree_depth = 3
-  # ) |>
-  #   set_mode('classification') |>
-  #   set_engine('xgboost')
-  
-  spec <- boost_tree(
-    mode = 'classification',
-    trees = 50,
-    tree_depth = 3,
-    mtry = NULL,
-    learn_rate = NULL,
-    min_n = NULL,
-    loss_reduction = NULL,
-    sample_size = NULL,
-    stop_iter = NULL
-  ) |> 
-    set_engine(
-      'xgboost',
-      stop_window = NULL,
-      stop_val = NULL,
-      nthread = -3,
-      verbose = 1
-    )
-  
-  wf <- workflow(
-    preprocessor = rec,
-    spec = spec
+  x <- .select_x(split$train)
+  y <- as.integer(split$train[[target]])
+  fit <- xgboost::xgboost(
+    data = x,
+    label = y,
+    eval_metric = 'logloss',
+    nrounds = 100,
+    print_every_n = 10,
+    max_depth = 3, 
+    n_jobs = -3
   )
-
-  model <- fit(wf, split$train)
-
-  suffix <- convert_atomic_bool_to_suffix(atomic)
-  xgboost::xgb.save(model$fit$fit$fit, file.path(FINAL_DATA_DIR, paste0('model_', target, suffix, '_r.model')))
-  model <- butcher(model)
-  write_rds(model, path)
-  model
+  xgboost::xgb.save(fit, path)
+  fit
 }
 
 fit_models <- function(split, atomic = TRUE, overwrite = FALSE) {
   list(
-    'scores' = fit_model(split, target = 'scores', atomic = atomic, overwrite = overwrite),
-    'concedes' = fit_model(split, target = 'concedes', atomic = atomic, overwrite = overwrite)
-  )
+    'scores',
+    'concedes'
+  ) |> 
+    set_names() |> 
+    map(
+      ~{
+        fit_model(
+          split, 
+          target = .x,
+          atomic = atomic, 
+          overwrite = overwrite
+        )
+      }
+    )
 }
 
-predict_vaep <- function(fits, split, atomic = TRUE) {
+read_py_model <- function(atomic, target) {
   suffix <- convert_atomic_bool_to_suffix(atomic)
-  col_o <- sym(paste0('ovaep', suffix))
-  col_d <- sym(paste0('dvaep', suffix))
-  col_total <- sym(paste0('vaep', suffix))
+  path <- file.path(FINAL_DATA_DIR, paste0('model_', target, suffix, '.model'))
+  xgboost::xgb.load(path)
+}
+
+read_py_models <- function(atomic = TRUE) {
+  list(
+    'scores',
+    'concedes'
+  ) |> 
+    set_names() |> 
+    map(
+      ~{
+        read_py_model(
+          atomic = atomic, 
+          target = .x
+        )
+      }
+    )
+}
+
+.predict_vaep <- function(fit, df, x = NULL) {
+  if (is.null(x)) {
+    x <- .select_x(df)
+  }
+  predict(fit, newdata = x)
+}
+
+.summarize_vaep_pred_contrib <- function(fit, df, target, atomic = TRUE, n = 10000, seed = 42) {
+  withr::local_seed(seed)
+  df <- slice_sample(df, n = n)
+  x <- .select_x(df)
+  suffix <- convert_atomic_bool_to_suffix(atomic)
+  col_pred <- sym('.pred')
+  # preds <- tibble(
+  #   !!col_pred := 1 - .predict_vaep(fit, x = x)
+  # )
+  
+  contrib <- predict(fit, x, predcontrib = TRUE) |>
+    as.data.frame() |>
+    as_tibble() |>
+    rename(baseline = BIAS)
+  
+  # feature_values <- x |> 
+  #   as.data.frame() |> 
+  #   mutate(
+  #     across(everything(), scale)
+  #   ) |> 
+  #   pivot_longer(
+  #     everything(),
+  #     names_to = 'feature',
+  #     values_to = 'feature_value'
+  #   ) |> 
+  #   as_tibble()
+  
+  long_contrib <- contrib |> 
+    pivot_longer(
+      -c(baseline),
+      names_to = 'feature',
+      values_to = 'contrib_value'
+    )
+  
+  long_contrib |>
+    group_by(feature) |>
+    summarize(
+      across(contrib_value, \(x) mean(abs(x))),
+    ) |>
+    ungroup() |>
+    mutate(
+      contrib_value_rank = row_number(desc(contrib_value)),
+      across(feature, ~fct_reorder(feature, desc(contrib_value_rank)))
+    ) |>
+    arrange(contrib_value_rank)
+}
+
+predict_vaep <- function(fits_r, fits_py, split, atomic = TRUE) {
+  suffix <- convert_atomic_bool_to_suffix(atomic)
+  col_scores_r <- sym(paste0('pred_scores', suffix, '_r'))
+  col_concedes_r <- sym(paste0('pred_concedes', suffix, '_r'))
+  col_total_r <- sym(paste0('pred', suffix, '_r'))
+  col_scores_py <- sym(paste0('pred_scores', suffix, '_py'))
+  col_concedes_py <- sym(paste0('pred_concedes', suffix, '_py'))
+  col_total_py <- sym(paste0('pred', suffix, '_py'))
   map_dfr(
     c(
       'train',
       'test'
     ),
     ~{
-      ovaep <- predict(
-        fits$scores, split[[.x]], type = 'prob'
-      ) |> 
-        select(!!col_o := .pred_yes)
-      dvaep <- predict(
-        fits$concedes, split[[.x]], type = 'prob'
-      ) |> 
-        select(!!col_d := .pred_yes)
-
+      pred_scores_r <- tibble(
+        !!col_scores_r := 1 - .predict_vaep(
+          fits_r$scores,
+          split[[.x]]
+        )
+      )
+      
+      pred_concedes_r <-  tibble(
+        !!col_concedes_r := 1 - .predict_vaep(
+          fits_r$concedes,
+          split[[.x]]
+        )
+      )
+      
+      pred_scores_py <- tibble(
+        !!col_scores_py := .predict_vaep(
+          fits_py$scores,
+          split[[.x]]
+        )
+      )
+      
+      pred_concedes_py <- tibble(
+        !!col_concedes_py := .predict_vaep(
+          fits_py$concedes,
+          split[[.x]]
+        )
+      )
+      
       vaep <- bind_cols(
         split[[.x]] |> select(scores),
-        ovaep,
+        pred_scores_r,
+        pred_scores_py,
         split[[.x]] |> select(concedes),
-        dvaep
+        pred_concedes_r,
+        pred_concedes_py
       ) |> 
-        mutate(!!col_total := !!col_o - !!col_d)
+        mutate(
+          !!col_total_r := !!col_scores_r - !!col_concedes_r,
+          !!col_total_py := !!col_scores_py - !!col_concedes_py
+        )
       
       bind_cols(
         split[[.x]] |> select(all_of(MODEL_ID_COLS)),
         vaep 
       ) |>
-        mutate(in_test = season_id == TEST_SEASON_ID, .before = 1)
+        mutate(
+          in_test = season_id == TEST_SEASON_ID, 
+          .before = 1
+        )
     }
   )
 }
@@ -164,11 +260,31 @@ xy_atomic <- import_xy('atomic', games = games)
 split <- split_train_test(xy)
 split_atomic <- split_train_test(xy_atomic)
 
-fits <- fit_models(split = split, atomic = FALSE, overwrite = TRUE)
-fits_atomic <- fit_models(split = split_atomic, atomic = TRUE, overwrite = TRUE)
+fits_r <- fit_models(split = split, atomic = FALSE, overwrite = TRUE)
+fits_atomic_r <- fit_models(split = split_atomic, atomic = TRUE, overwrite = TRUE)
 
-preds <- predict_vaep(fits, split = split, atomic = FALSE)
-preds_atomic <- predict_vaep(fits_atomic, split = split_atomic, atomic = TRUE)
+fits_py <- read_py_models(atomic = FALSE)
+fits_atomic_py <- read_py_models(atomic = TRUE)
+
+preds <- predict_vaep(
+  fits_r = fits_r, 
+  fits_py = fits_py, 
+  split = split, 
+  atomic = FALSE
+)
+preds_atomic <- predict_vaep(
+  fits_r = fits_atomic_r, 
+  fits_py = fits_atomic_py, 
+  split = split_atomic, 
+  atomic = TRUE
+)
 
 export_parquet(preds)
 export_parquet(preds_atomic)
+
+## debug ----
+# preds_atomic |> 
+#   mutate(
+#     d = vaep_atomic_r - vaep_atomic_py
+#   ) |> 
+#   arrange(desc(d))
