@@ -18,7 +18,7 @@ import socceraction.xthreat as xthreat
 #%%
 ## globals
 COMPETITION_ID = 8
-SEASON_ID = 2020
+SEASON_ID = 2023
 RAW_DATA_DIR = f'../data/raw/'
 PROCESSED_DATA_DIR = f'../data/processed/{COMPETITION_ID}/{SEASON_ID}'
 
@@ -44,7 +44,7 @@ def generate_parquet_path(basename, dir=PROCESSED_DATA_DIR):
 def generate_pickle_path(basename, dir=PROCESSED_DATA_DIR):
   return generate_path(dir=dir, ext='pickle', basename=basename)
 
-def do_if_parquet_path_not_exists(path, overwrite=True):
+def do_if_parquet_path_not_exists(path, overwrite=False):
   def decorator(f):
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
@@ -68,7 +68,7 @@ def write_pickle(data, path):
     pickle.dump(data, handle, protocol=pickle.HIGHEST_PROTOCOL)
   return path
 
-def do_if_pickle_path_not_exists(path, overwrite=True):
+def do_if_pickle_path_not_exists(path, overwrite=False):
   def decorator(f):
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
@@ -271,7 +271,11 @@ def get_x_atomic(loader, games):
   
   return pd.concat(res).reset_index(drop=True)
 
-_yfns = [lab.scores, lab.concedes]
+_yfns = [
+  lab.scores, 
+  lab.concedes,
+  lab.goal_from_shot
+]
 def get_game_y(loader, game_id, home_team_id):
   @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(PROCESSED_DATA_DIR, 'y')))
   def f(loader, game_id, home_team_id):
@@ -289,7 +293,11 @@ def get_y(loader, games):
   
   return pd.concat(res).reset_index(drop=True)
 
-_yfns_atomic = [lab_atomic.scores, lab_atomic.concedes]
+_yfns_atomic = [
+  lab_atomic.scores, 
+  lab_atomic.concedes,
+  lab_atomic.goal_from_shot
+]
 def get_game_y_atomic(loader, game_id, home_team_id):
   @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(PROCESSED_DATA_DIR, 'y_atomic')))
   def f(loader, game_id, home_team_id):
