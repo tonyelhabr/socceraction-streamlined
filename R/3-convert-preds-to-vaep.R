@@ -2,6 +2,8 @@ library(dplyr)
 library(tibble)
 library(purrr)
 
+source(file.path('R', 'helpers.R'))
+
 ## https://github.com/ML-KULeuven/socceraction/blob/master/socceraction/vaep/formula.py
 ## https://github.com/ML-KULeuven/socceraction/blob/master/socceraction/atomic/vaep/formula.py
 get_vaep_prev_actions <- function(
@@ -138,8 +140,8 @@ av_and_preds <- av |>
   left_join(
     preds |> 
       select(
-        in_test_set,
-        any_of(MODEL_ID_COLS),
+        in_test,
+        all_of(MODEL_ID_COLS),
         pred_scores,
         pred_concedes
       ),
@@ -151,7 +153,7 @@ vaep <- av_and_preds |>
   map_dfr(
     ~{
       bind_cols(
-        .x |> select(in_test_set, all_of(MODEL_ID_COLS)),
+        .x |> select(in_test, all_of(MODEL_ID_COLS)),
         get_vaep_values(
           team_id = .x$team_id, 
           time_seconds = .x$time_seconds, 
@@ -173,10 +175,10 @@ ava_and_preds_atomic <- ava |>
   left_join(
     preds_atomic |> 
       select(
-        in_test_set,
-        any_of(MODEL_ID_COLS),
-        pred_scores,
-        pred_concedes
+        in_test,
+        all_of(MODEL_ID_COLS),
+        pred_scores_atomic,
+        pred_concedes_atomic
       ),
     by = join_by(!!!MODEL_ID_COLS)
   )
@@ -186,12 +188,12 @@ vaep_atomic <- ava_and_preds_atomic |>
   map_dfr(
     ~{
       bind_cols(
-        .x |> select(in_test_set, all_of(MODEL_ID_COLS)),
+        .x |> select(in_test, all_of(MODEL_ID_COLS)),
         get_vaep_atomic_values(
           team_id = .x$team_id, 
           type_name = .x$type_name, 
-          concedes = .x$pred_concedes,
-          scores = .x$pred_scores
+          concedes = .x$pred_concedes_atomic,
+          scores = .x$pred_scores_atomic
         )
       )
     }
