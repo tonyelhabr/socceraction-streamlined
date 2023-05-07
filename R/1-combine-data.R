@@ -5,13 +5,11 @@ library(fs)
 source(file.path('R', 'helpers.R'))
 
 do_import_parquets <- function(x, assign = TRUE) {
-  message(sprintf('Processing %s.', x))
   paths <- dir_ls(
     file.path(PROCESSED_DATA_DIR, COMPETITION_ID, SEASON_END_YEARS),
     regexp = paste0('\\/', x, '\\.parquet$'),
     recurse = TRUE
   )
-  message(sprintf('Found %s file paths.', length(paths)))
   
   res <- map_dfr(
     paths,
