@@ -88,7 +88,6 @@ all_vaep <- ava |>
   )
 export_parquet(all_vaep)
 rm(list = c('av', 'ava', 'vaep', 'vaep_atomic'))
-gc()
 
 ## debug ----
 player_games <- players |> 
@@ -98,18 +97,43 @@ player_games <- players |>
   )
 
 player_starting_positions <- player_games |> 
-  filter(starting_position != 'Sub') |> 
   group_by(competition_id, season_id, player_id, starting_position) |> 
   summarize(
     across(minutes_played, sum)
   ) |> 
-  ungroup() |> 
+  ungroup()
+
+most_common_player_starting_positions <- player_starting_positions |> 
+  filter(starting_position != 'Sub') |> 
   group_by(competition_id, season_id, player_id) |> 
   filter(row_number(desc(minutes_played)) == 1L) |> 
   ungroup() 
-player_starting_positions |> count(starting_position, sort = TRUE)
 
-player_teams <- player_games |> 
+## TODO: Use this to determine player position weightings?
+# player_positions <- player_games |> 
+#   group_by(competition_id, season_id, player_id) |> 
+#   summarize(
+#     total_minutes_played = sum(minutes_played, na.rm = TRUE)
+#   ) |> 
+#   ungroup() |> 
+#   left_join(
+#     player_starting_positions |> 
+#       filter(starting_position != 'Sub') |> 
+#       group_by(competition_id, season_id, player_id) |> 
+#       mutate(
+#         starter_minutes_played = sum(minutes_played),
+#         prop = minutes_played / starter_minutes_played
+#       ) |> 
+#         ungroup(),
+#     by = join_by(competition_id, season_id, player_id)
+#   ) |> 
+#   filter(total_minutes_played > 0, !is.na(starting_position)) |> 
+#   mutate(
+#     extrapolated_minutes_played = minutes_played + prop * (total_minutes_played - starter_minutes_played)
+#   ) |> 
+#   arrange(competition_id, season_id, player_id)
+
+most_common_player_teams <- player_games |> 
   group_by(competition_id, season_id, player_id, team_id) |> 
   summarize(
     across(minutes_played, sum)
@@ -144,7 +168,7 @@ players_season_games <- player_games |>
     by = join_by(competition_id, season_id, player_id)
   ) |> 
   left_join(
-    player_teams |> 
+    most_common_player_teams |> 
       select(
         competition_id,
         season_id,
@@ -155,7 +179,7 @@ players_season_games <- player_games |>
     by = join_by(competition_id, season_id, player_id)
   ) |> 
   left_join(
-    player_starting_positions |> 
+    most_common_player_starting_positions |> 
       select(
         competition_id,
         season_id,
@@ -189,9 +213,9 @@ vaep_by_player_season <- all_vaep |>
     in_test, 
     competition_id,
     season_id,
-    # player_id,
+    player_id,
     player_name,
-    # team_id,
+    team_id,
     team_name,
     starting_position,
     n_actions,
@@ -202,12 +226,18 @@ vaep_by_player_season <- all_vaep |>
     g,
     xt,
     ovaep,
+    dvaep,
     vaep,
     ovaep_atomic,
+    dvaep_atomic,
     vaep_atomic,
     xt_p90,
+    ovaep_p90,
+    dvaep_p90,
     vaep_p90,
-    vaep_atomic_p90,
+    ovaep_atomic_p90,
+    dvaep_atomic_p90,
+    vaep_atomic_p90
   ) |> 
   arrange(desc(vaep_atomic))
 export_parquet(players_season_games)
@@ -215,11 +245,12 @@ export_parquet(vaep_by_player_season)
 
 ## debug ----
 # vaep_by_player_season |> arrange(desc(vaep_atomic))
-# vaep_by_player_season |> 
-#   group_by(in_test, competition_id, season_id) |> 
+# vaep_by_player_season |>
+#   group_by(in_test, competition_id, season_id) |>
 #   summarize(
 #     across(
 #       c(
+#         g,
 #         xt,
 #         ovaep,
 #         vaep,
@@ -228,6 +259,6 @@ export_parquet(vaep_by_player_season)
 #       ),
 #       \(x) sum(x, na.rm = TRUE)
 #     )
-#   ) |> 
-#   ungroup() |> 
+#   ) |>
+#   ungroup() |>
 #   arrange(competition_id, season_id)
