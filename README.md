@@ -18,8 +18,11 @@ Scripts are meant to be run in the following order.
 2.  `R/1-combine-data.R`:
     -   Combine multiple competitions and seasons of data nested under `PROCESSED_DATA_DIR` into one new folder `FINAL_DATA_DIR` to prepare for modeling and so forth.
 3.  `R/2-model-and-predict.R`
-    -   Fit xgboost models for scoring and conceding probabilities, run predictions to generate `ovaep` and `dvaep`, and combine the predictions into `vaep`.
-    -   Adds possession IDs to predictions.
-4.  `R/3-post-process.R`
-    -   Combine the VAEP predictions with the actions data set.
+    -   Fit xgboost models for scoring and conceding probabilities.
+4.  `R/3-convert-preds-to-vaep.R`
+    -   Converts xgboost predictions to VAEP value (i.e. what `soccerction.vaep.formula.vaepformula()` and `soccerction.atomic.vaep.formula.vaepformula()` do)
+5.  `R/4-post-process-vaep.R`
+    -   Combine the VAEP values with the actions data set.
     -   Summarize pleyer seasons.
+
+There is also a script `R/3-evaluate-models` that can be used to calculate ROC AUC, log loss, and Brier score for the xgboost models. It's not essential to the workflow, but it's useful for comparing one's own models to those in the [VAEP paper](https://arxiv.org/pdf/1802.07127.pdf).
