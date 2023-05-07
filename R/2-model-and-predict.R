@@ -73,12 +73,12 @@ df_to_mat <- function(df) {
 
 fit_model <- function(split, target, atomic = TRUE, overwrite = FALSE) {
   suffix <- convert_atomic_bool_to_suffix(atomic)
-  path <- file.path(FINAL_DATA_DIR, paste0('model_', target, suffix, '_r.model'))
+  path <- file.path(FINAL_DATA_DIR, paste0('model_', target, suffix, '.model'))
   if (file.exists(path) & isFALSE(overwrite)) {
     return(xgboost::xgb.load(path))
   }
   x <- .select_x(split$train)
-  y <- as.integer(split$train[[target]])
+  y <- as.integer(split$train[[target]]) - 1L
   fit <- xgboost::xgboost(
     data = x,
     label = y,
@@ -127,14 +127,14 @@ predict_values <- function(fits, split, atomic = TRUE) {
     ),
     ~{
       pred_scores <- tibble(
-        !!col_scores := 1 - .predict_value(
+        !!col_scores := .predict_value(
           fits$scores,
           split[[.x]]
         )
       )
       
       pred_concedes <-  tibble(
-        !!col_concedes := 1 - .predict_value(
+        !!col_concedes := .predict_value(
           fits$concedes,
           split[[.x]]
         )
