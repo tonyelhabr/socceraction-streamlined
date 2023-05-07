@@ -28,6 +28,9 @@ c(
 #   hist()
 
 all_vaep <- ava |>
+  # mutate(
+  #   g_atomic = as.integer(type_name %in% c('goal', 'owngoal'))
+  # ) |> 
   ## Dummy col so that we don't overwrite the actual col
   mutate(dummy_original_event_id = original_event_id) |> 
   fill(dummy_original_event_id, .direction = 'downup') |> 
@@ -38,7 +41,7 @@ all_vaep <- ava |>
       ## fill the column so that we can get a 1-to-1 match with the atomic actions
       mutate(dummy_original_event_id = original_event_id) |>
       fill(dummy_original_event_id, .direction = 'downup') |>
-      select(
+      transmute(
         action_id,
         game_id,
         dummy_original_event_id,
@@ -49,6 +52,7 @@ all_vaep <- ava |>
         type_id,
         result_id,
         result_name,
+        g = as.integer((type_name %in% c('shot', 'shot_freekick', 'shot_penalty')) & (result_name == 'success')),
         xt
       ),
     by = join_by(
@@ -93,6 +97,18 @@ player_games <- players |>
     by = join_by(game_id)
   )
 
+player_starting_positions <- player_games |> 
+  filter(starting_position != 'Sub') |> 
+  group_by(competition_id, season_id, player_id, starting_position) |> 
+  summarize(
+    across(minutes_played, sum)
+  ) |> 
+  ungroup() |> 
+  group_by(competition_id, season_id, player_id) |> 
+  filter(row_number(desc(minutes_played)) == 1L) |> 
+  ungroup() 
+player_starting_positions |> count(starting_position, sort = TRUE)
+
 player_teams <- player_games |> 
   group_by(competition_id, season_id, player_id, team_id) |> 
   summarize(
@@ -107,7 +123,7 @@ player_teams <- player_games |>
     by = join_by(team_id)
   )
 
-players_agg <- player_games |> 
+players_season_games <- player_games |> 
   group_by(competition_id, season_id, player_id, player_name) |> 
   summarize(
     n_teams = n_distinct(team_id),
@@ -122,6 +138,12 @@ players_agg <- player_games |>
     by = join_by(competition_id, season_id, player_id)
   ) |> 
   left_join(
+    player_games |> 
+      filter(is_starter) |> 
+      count(competition_id, season_id, player_id, name = 'games_started'),
+    by = join_by(competition_id, season_id, player_id)
+  ) |> 
+  left_join(
     player_teams |> 
       select(
         competition_id,
@@ -131,6 +153,19 @@ players_agg <- player_games |>
         team_name
       ),
     by = join_by(competition_id, season_id, player_id)
+  ) |> 
+  left_join(
+    player_starting_positions |> 
+      select(
+        competition_id,
+        season_id,
+        player_id,
+        starting_position
+      ),
+    by = join_by(competition_id, season_id, player_id)
+  ) |> 
+  mutate(
+    across(c(games_played, games_started), \(x) coalesce(x, 0L))
   )
 
 vaep_by_player_season <- all_vaep |> 
@@ -139,48 +174,60 @@ vaep_by_player_season <- all_vaep |>
   summarize(
     n_actions = sum(!is.na(action_id)),
     n_actions_atomic = n(),
-    across(matches('vaep'), \(x) sum(x, na.rm = TRUE))
+    across(c(g, matches('vaep|xt')), \(x) sum(x, na.rm = TRUE))
   ) |> 
   ungroup() |> 
   inner_join(
-    players_agg,
+    players_season_games,
     by = join_by(competition_id, season_id, player_id)
   ) |> 
   mutate(
-    across(matches('^vaep'), list(p90 = \(x) x * 90 / minutes_played))
+    across(c(g, matches('vaep|xt')), list(p90 = \(x) x * 90 / minutes_played))
   ) |> 
   # filter(season_id == 2021) |> 
   select(
     in_test, 
     competition_id,
     season_id,
-    player_id,
+    # player_id,
     player_name,
-    team_id,
+    # team_id,
     team_name,
+    starting_position,
     n_actions,
     n_actions_atomic,
     minutes_played,
     games_played,
+    games_started,
+    g,
+    xt,
+    ovaep,
     vaep,
+    ovaep_atomic,
     vaep_atomic,
+    xt_p90,
     vaep_p90,
     vaep_atomic_p90,
   ) |> 
   arrange(desc(vaep_atomic))
+export_parquet(players_season_games)
 export_parquet(vaep_by_player_season)
 
-vaep_by_player_season |> arrange(desc(vaep_atomic))
-vaep_by_player_season |> 
-  group_by(in_test, competition_id, season_id) |> 
-  summarize(
-    across(
-      c(
-        vaep,
-        vaep_atomic,
-      ),
-      \(x) sum(x, na.rm = TRUE)
-    )
-  ) |> 
-  ungroup() |> 
-  arrange(competition_id, season_id)
+## debug ----
+# vaep_by_player_season |> arrange(desc(vaep_atomic))
+# vaep_by_player_season |> 
+#   group_by(in_test, competition_id, season_id) |> 
+#   summarize(
+#     across(
+#       c(
+#         xt,
+#         ovaep,
+#         vaep,
+#         ovaep_atomic,
+#         vaep_atomic,
+#       ),
+#       \(x) sum(x, na.rm = TRUE)
+#     )
+#   ) |> 
+#   ungroup() |> 
+#   arrange(competition_id, season_id)
