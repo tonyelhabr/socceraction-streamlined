@@ -7,8 +7,8 @@ source(file.path('R', 'helpers.R'))
 c(
   'av',
   'ava',
-  'preds',
-  'preds_atomic',
+  'vaep',
+  'vaep_atomic',
   'teams',
   'players',
   'games'
@@ -27,7 +27,7 @@ c(
 #   pull(vaep_atomic) |> 
 #   hist()
 
-vaep_atomic <- ava |>
+all_vaep <- ava |>
   ## Dummy col so that we don't overwrite the actual col
   mutate(dummy_original_event_id = original_event_id) |> 
   fill(dummy_original_event_id, .direction = 'downup') |> 
@@ -67,23 +67,23 @@ vaep_atomic <- ava |>
     .after = atomic_action_id
   ) |> 
   left_join(
-    preds |> select(-in_test),
+    vaep |> select(-in_test),
     by = join_by(!!!MODEL_ID_COLS)
   ) |> 
   left_join(
-    preds_atomic,
+    vaep_atomic,
     by = join_by(
-      c(setdiff(MODEL_ID_COLS), 'action_id')
-      # competition_id,
-      # season_id,
-      # game_id,
-      # period_id,
-      # team_id,
+      # c(setdiff(MODEL_ID_COLS), 'action_id'),
+      competition_id,
+      season_id,
+      game_id,
+      period_id,
+      team_id,
       atomic_action_id == action_id
     )
   )
-export_parquet(vaep_atomic)
-rm(list = c('av', 'ava', 'preds', 'preds_atomic'))
+export_parquet(all_vaep)
+rm(list = c('av', 'ava', 'vaep', 'vaep_atomic'))
 gc()
 
 ## debug ----
@@ -133,7 +133,7 @@ players_agg <- player_games |>
     by = join_by(competition_id, season_id, player_id)
   )
 
-vaep_atomic_by_player_season <- vaep_atomic |> 
+vaep_by_player_season <- all_vaep |> 
   # filter(season_id == 2023L) |> 
   group_by(in_test, competition_id, season_id, player_id) |> 
   summarize(
@@ -161,30 +161,23 @@ vaep_atomic_by_player_season <- vaep_atomic |>
     n_actions,
     n_actions_atomic,
     minutes_played,
-    ## TODO: games played, games started
-    vaep_r,
-    vaep_py,
-    vaep_atomic_r,
-    vaep_atomic_py,
-    vaep_r_p90,
-    vaep_py_p90,
-    vaep_atomic_r_p90,
-    vaep_atomic_py_p90
+    games_played,
+    vaep,
+    vaep_atomic,
+    vaep_p90,
+    vaep_atomic_p90,
   ) |> 
-  arrange(desc(vaep_atomic_r))
-export_parquet(vaep_atomic_by_player_season)
+  arrange(desc(vaep_atomic))
+export_parquet(vaep_by_player_season)
 
-# vaep_atomic_by_player_season |> arrange(desc(vaep_atomic_r))
-vaep_atomic_by_player_season |> arrange(desc(vaep_atomic_py))
-vaep_atomic_by_player_season |> 
+vaep_by_player_season |> arrange(desc(vaep_atomic))
+vaep_by_player_season |> 
   group_by(in_test, competition_id, season_id) |> 
   summarize(
     across(
       c(
-        vaep_r,
-        vaep_py,
-        vaep_atomic_r,
-        vaep_atomic_py
+        vaep,
+        vaep_atomic,
       ),
       \(x) sum(x, na.rm = TRUE)
     )
