@@ -221,12 +221,12 @@ split_atomic <- split_train_test(xy_atomic)
 fits <- fit_models(
   split = split, 
   atomic = FALSE, 
-  overwrite = TRUE
+  overwrite = FALSE
 )
 fits_atomic <- fit_models(
   split = split_atomic, 
   atomic = TRUE,
-  overwrite = TRUE
+  overwrite = FALSE
 )
 
 preds <- predict_values(
