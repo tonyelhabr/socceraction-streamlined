@@ -106,31 +106,34 @@ player_starting_positions <- player_games |>
 most_common_player_starting_positions <- player_starting_positions |> 
   filter(starting_position != 'Sub') |> 
   group_by(competition_id, season_id, player_id) |> 
+  mutate(
+    prop = minutes_played / sum(minutes_played)
+  ) |> 
   filter(row_number(desc(minutes_played)) == 1L) |> 
-  ungroup() 
+  ungroup()
 
 ## TODO: Use this to determine player position weightings?
-# player_positions <- player_games |> 
-#   group_by(competition_id, season_id, player_id) |> 
+# player_positions <- player_games |>
+#   group_by(competition_id, season_id, player_id) |>
 #   summarize(
 #     total_minutes_played = sum(minutes_played, na.rm = TRUE)
-#   ) |> 
-#   ungroup() |> 
+#   ) |>
+#   ungroup() |>
 #   left_join(
-#     player_starting_positions |> 
-#       filter(starting_position != 'Sub') |> 
-#       group_by(competition_id, season_id, player_id) |> 
+#     player_starting_positions |>
+#       filter(starting_position != 'Sub') |>
+#       group_by(competition_id, season_id, player_id) |>
 #       mutate(
 #         starter_minutes_played = sum(minutes_played),
 #         prop = minutes_played / starter_minutes_played
-#       ) |> 
+#       ) |>
 #         ungroup(),
 #     by = join_by(competition_id, season_id, player_id)
-#   ) |> 
-#   filter(total_minutes_played > 0, !is.na(starting_position)) |> 
+#   ) |>
+#   filter(total_minutes_played > 0, !is.na(starting_position)) |>
 #   mutate(
 #     extrapolated_minutes_played = minutes_played + prop * (total_minutes_played - starter_minutes_played)
-#   ) |> 
+#   ) |>
 #   arrange(competition_id, season_id, player_id)
 
 most_common_player_teams <- player_games |> 
@@ -184,6 +187,7 @@ players_season_games <- player_games |>
         competition_id,
         season_id,
         player_id,
+        starting_position_prop = prop,
         starting_position
       ),
     by = join_by(competition_id, season_id, player_id)
@@ -218,6 +222,7 @@ vaep_by_player_season <- all_vaep |>
     team_id,
     team_name,
     starting_position,
+    starting_position_prop,
     n_actions,
     n_actions_atomic,
     minutes_played,
