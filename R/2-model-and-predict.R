@@ -16,7 +16,7 @@ add_suffix <- function(prefix, suffix) {
 import_xy <- function(suffix = '', games) {
   inner_join(
     import_parquet(add_suffix('y', suffix = suffix)),
-    import_parquet(add_suffix('x', suffix = suffix)),
+    import_parquet(add_suffix('x', suffix = suffix)) |> select(-matches('_a[1-2]$')),
     by = join_by(game_id, action_id)
   ) |> 
     inner_join(
@@ -212,7 +212,7 @@ summarize_pred_contrib <- function(fits, df) {
 
 ## main ----
 games <- import_parquet('games')
-xy <- import_xy( games = games)
+xy <- import_xy(games = games)
 xy_atomic <- import_xy('atomic', games = games)
 
 split <- split_train_test(xy)
