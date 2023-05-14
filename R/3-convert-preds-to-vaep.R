@@ -150,6 +150,8 @@ av_and_preds <- av |>
       select(
         in_test,
         all_of(MODEL_ID_COLS),
+        scores,
+        concedes,
         pred_scores,
         pred_concedes
       ),
@@ -161,7 +163,15 @@ vaep <- av_and_preds |>
   map_dfr(
     ~{
       bind_cols(
-        .x |> select(in_test, all_of(MODEL_ID_COLS)),
+        .x |> 
+          select(
+            in_test, 
+            all_of(MODEL_ID_COLS), 
+            scores,
+            concedes,
+            pred_scores,
+            pred_concedes
+          ),
         get_vaep_values(
           team_id = .x$team_id, 
           time_seconds = .x$time_seconds, 
@@ -185,6 +195,8 @@ ava_and_preds_atomic <- ava |>
       select(
         in_test,
         all_of(MODEL_ID_COLS),
+        scores_atomic = scores,
+        concedes_atomic = concedes,
         pred_scores_atomic,
         pred_concedes_atomic
       ),
@@ -196,7 +208,14 @@ vaep_atomic <- ava_and_preds_atomic |>
   map_dfr(
     ~{
       bind_cols(
-        .x |> select(in_test, all_of(MODEL_ID_COLS)),
+        .x |> select(
+          in_test, 
+          all_of(MODEL_ID_COLS), 
+          scores_atomic,
+          concedes_atomic,
+          pred_scores_atomic,
+          pred_concedes_atomic
+        ),
         get_vaep_atomic_values(
           team_id = .x$team_id, 
           type_name = .x$type_name, 
