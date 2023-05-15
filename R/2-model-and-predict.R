@@ -54,6 +54,12 @@ convert_atomic_bool_to_suffix <- function(atomic = TRUE) {
   ifelse(isTRUE(atomic), '_atomic', '')
 }
 
+model_cols <- list(
+  ## notebooks also have type_id_a0 and result_id_a0, but those are unncessary since we onehot type and result
+  'non-atomic' = c('type_pass_a0', 'type_cross_a0', 'type_throw_in_a0', 'type_freekick_crossed_a0', 'type_freekick_short_a0', 'type_corner_crossed_a0', 'type_corner_short_a0', 'type_take_on_a0', 'type_foul_a0', 'type_tackle_a0', 'type_interception_a0', 'type_shot_a0', 'type_shot_penalty_a0', 'type_shot_freekick_a0', 'type_keeper_save_a0', 'type_keeper_claim_a0', 'type_keeper_punch_a0', 'type_keeper_pick_up_a0', 'type_clearance_a0', 'type_bad_touch_a0', 'type_non_action_a0', 'type_dribble_a0', 'type_goalkick_a0', 'bodypart_foot_a0', 'bodypart_head_a0', 'bodypart_other_a0', 'bodypart_head/other_a0', 'result_fail_a0', 'result_success_a0', 'result_offside_a0', 'result_owngoal_a0', 'result_yellow_card_a0', 'result_red_card_a0', 'goalscore_team', 'goalscore_opponent', 'goalscore_diff', 'start_x_a0', 'start_y_a0', 'end_x_a0', 'end_y_a0', 'dx_a0', 'dy_a0', 'movement_a0', 'start_dist_to_goal_a0', 'start_angle_to_goal_a0', 'end_dist_to_goal_a0', 'end_angle_to_goal_a0'),
+  'atomic' = c('type_pass_a0', 'type_cross_a0', 'type_throw_in_a0', 'type_freekick_crossed_a0', 'type_freekick_short_a0', 'type_corner_crossed_a0', 'type_corner_short_a0', 'type_take_on_a0', 'type_foul_a0', 'type_tackle_a0', 'type_interception_a0', 'type_shot_a0', 'type_shot_penalty_a0', 'type_shot_freekick_a0', 'type_keeper_save_a0', 'type_keeper_claim_a0', 'type_keeper_punch_a0', 'type_keeper_pick_up_a0', 'type_clearance_a0', 'type_bad_touch_a0', 'type_non_action_a0', 'type_dribble_a0', 'type_goalkick_a0', 'type_receival_a0', 'type_out_a0', 'type_offside_a0', 'type_goal_a0', 'type_owngoal_a0', 'type_yellow_card_a0', 'type_red_card_a0', 'type_corner_a0', 'type_freekick_a0', 'bodypart_foot_a0', 'bodypart_head_a0', 'bodypart_other_a0', 'bodypart_head/other_a0', 'goalscore_team', 'goalscore_opponent', 'goalscore_diff', 'x_a0', 'y_a0', 'dist_to_goal_a0', 'angle_to_goal_a0', 'dx_a0', 'dy_a0', 'period_id_a0', 'time_seconds_a0', 'time_seconds_overall_a0')
+)
+
 df_to_mat <- function(df) {
   model.matrix(
     ~.+0,
@@ -65,9 +71,13 @@ df_to_mat <- function(df) {
   )
 }
 
-.select_x <- function(df) {
+.select_x <- function(df, atomic = TRUE) {
   df |> 
-    select(-c(scores, concedes), -all_of(MODEL_ID_COLS)) |> 
+    select(
+      # -c(scores, concedes), 
+      # -all_of(MODEL_ID_COLS)
+      all_of(model_cols[[ifelse(atomic, 'atomic', 'non-atomic')]])
+    ) |> 
     df_to_mat()
 }
 
@@ -77,7 +87,7 @@ fit_model <- function(split, target, atomic = TRUE, overwrite = FALSE) {
   if (file.exists(path) & isFALSE(overwrite)) {
     return(xgboost::xgb.load(path))
   }
-  x <- .select_x(split$train)
+  x <- .select_x(split$train, atomic = atomic)
   y <- as.integer(split$train[[target]]) - 1L
   fit <- xgboost::xgboost(
     data = x,
@@ -110,8 +120,8 @@ fit_models <- function(split, atomic = TRUE, overwrite = FALSE) {
     )
 }
 
-.predict_value <- function(fit, df, ...) {
-  x <- .select_x(df)
+.predict_value <- function(fit, df, atomic = TRUE, ...) {
+  x <- .select_x(df, atomic = atomic)
   predict(fit, newdata = x, ...)
 }
 
@@ -128,18 +138,20 @@ predict_values <- function(fits, split, atomic = TRUE) {
     ~{
       pred_scores <- tibble(
         !!col_scores := .predict_value(
-          fits$scores,
-          split[[.x]]
+          fit = fits$scores,
+          df = split[[.x]],
+          atomic = atomic
         )
       )
       
       pred_concedes <-  tibble(
         !!col_concedes := .predict_value(
-          fits$concedes,
-          split[[.x]]
+          fit = fits$concedes,
+          df = split[[.x]],
+          atomic = atomic
         )
       )
-
+      
       vaep <- bind_cols(
         split[[.x]] |> select(scores),
         pred_scores,
@@ -162,11 +174,11 @@ predict_values <- function(fits, split, atomic = TRUE) {
   )
 }
 
-.summarize_pred_contrib <- function(fit, df, n = 50000, seed = 42) {
+.summarize_pred_contrib <- function(fit, df, atomic = TRUE, n = 50000, seed = 42) {
   withr::local_seed(seed)
   df <- slice_sample(df, n = n)
-
-  contrib <- .predict_value(fit, df, predcontrib = TRUE) |>
+  
+  contrib <- .predict_value(fit, df, atomic = atomic, predcontrib = TRUE) |>
     as.data.frame() |>
     as_tibble() |>
     rename(baseline = BIAS)
@@ -191,7 +203,7 @@ predict_values <- function(fits, split, atomic = TRUE) {
     arrange(contrib_value_rank)
 }
 
-summarize_pred_contrib <- function(fits, df) {
+summarize_pred_contrib <- function(fits, df, atomic) {
   list(
     'scores',
     'concedes'
@@ -200,7 +212,8 @@ summarize_pred_contrib <- function(fits, df) {
       ~{
         .summarize_pred_contrib(
           fit = fits[[.x]], 
-          df = df
+          df = df,
+          atomic = atomic
         ) |> 
           mutate(
             side = .x,
@@ -242,12 +255,14 @@ preds_atomic <- predict_values(
 
 contrib <- summarize_pred_contrib(
   fits = fits,
-  df = split$test
+  df = split$test,
+  atomic = FALSE
 )
 
 contrib_atomic <- summarize_pred_contrib(
   fits = fits_atomic,
-  df = split_atomic$test
+  df = split_atomic$test,
+  atomic = TRUE
 )
 
 export_parquet(preds)
