@@ -190,7 +190,7 @@ _xfns = [
   fs.time_delta
 ]
 ## model only needs 1, but get 2 for xg model
-_n_prev_actions = 2
+_n_prev_actions = 1
 
 def get_game_gamestates(loader, game_id, home_team_id): 
   @do_if_pickle_path_not_exists(path=generate_pickle_path(game_id, dir=os.path.join(PROCESSED_DATA_DIR, 'gamestates')))
