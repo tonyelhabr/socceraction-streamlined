@@ -17,8 +17,8 @@ import socceraction.xthreat as xthreat
 
 #%%
 ## globals
-COMPETITION_ID = 8
-SEASON_ID = 2023
+COMPETITION_ID = 85
+SEASON_ID = 2014
 RAW_DATA_DIR = f'../data/raw/'
 PROCESSED_DATA_DIR = f'../data/processed/{COMPETITION_ID}/{SEASON_ID}'
 
@@ -82,6 +82,17 @@ def do_if_pickle_path_not_exists(path, overwrite=False):
     return wrapper
   return decorator
 
+def possibly(default_value):
+  def decorator(f):
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+      try:
+        return f(*args, **kwargs)
+      except Exception:
+        return default_value
+    return wrapper
+  return decorator
+
 @do_if_parquet_path_not_exists(path=generate_parquet_path('games'))
 def get_games(loader):
   games = list(
@@ -106,10 +117,14 @@ def get_teams(loader, games):
   
   return pd.concat(res).drop_duplicates('team_id').reset_index(drop=True)
 
+@possibly(pd.DataFrame())
+def possibly_load_players(loader, game_id):
+  return loader.players(game_id)
+
 def get_game_players(loader, game_id):
   @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(PROCESSED_DATA_DIR, 'players')))
   def f(game_id):
-    return loader.players(game_id)
+    return possibly_load_players(loader, game_id)
     
   return f(game_id)
 
@@ -121,12 +136,17 @@ def get_players(loader, games):
   
   return pd.concat(res).reset_index(drop=True)
 
+@possibly(pd.DataFrame())
+def possibly_load_events(loader, game_id):
+  return loader.events(game_id)
+
 def get_game_actions(loader, game_id, home_team_id):
   @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(PROCESSED_DATA_DIR, 'actions')))
+  @possibly(pd.DataFrame())
   def f(events, home_team_id):
     return converter.convert_to_actions(events, home_team_id)
   
-  return f(loader.events(game_id), home_team_id)
+  return f(possibly_load_events(loader, game_id), home_team_id)
   
 @do_if_parquet_path_not_exists(path=generate_parquet_path('actions'))
 def get_actions(loader, games):
@@ -138,6 +158,7 @@ def get_actions(loader, games):
 
 def get_game_actions_atomic(loader, game_id, home_team_id):
   @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(PROCESSED_DATA_DIR, 'actions_atomic')))
+  @possibly(pd.DataFrame())
   def f(loader, game_id, home_team_id):
     actions = get_game_actions(loader, game_id=game_id, home_team_id=home_team_id)
     return atomicspadl.convert_to_atomic(actions)
@@ -194,6 +215,7 @@ _n_prev_actions = 1
 
 def get_game_gamestates(loader, game_id, home_team_id): 
   @do_if_pickle_path_not_exists(path=generate_pickle_path(game_id, dir=os.path.join(PROCESSED_DATA_DIR, 'gamestates')))
+  @possibly(pd.DataFrame())
   def f(loader, game_id, home_team_id):
     actions = get_game_actions(loader=loader, game_id=game_id, home_team_id=home_team_id)
     gamestates = fs.gamestates(spadl.add_names(actions), _n_prev_actions)
@@ -203,6 +225,7 @@ def get_game_gamestates(loader, game_id, home_team_id):
 
 def get_game_gamestate_actions(loader, game_id, home_team_id):
   @do_if_parquet_path_not_exists(path=generate_parquet_path(game_id, dir=os.path.join(PROCESSED_DATA_DIR, 'gamestate_actions')))
+  @possibly(pd.DataFrame())
   def f(loader, game_id, home_team_id):
     gamestates = get_game_gamestates(loader=loader, game_id=game_id, home_team_id=home_team_id)
     return pd.DataFrame(gamestates[0])
@@ -363,15 +386,19 @@ games = (
   .reset_index(drop=True)
 )
 
+get_bodyparts()
+get_results()
+get_actiontypes()
+get_actiontypes_atomic()
+
 teams = get_teams(loader=loader, games=games)
-players = get_players(loader=loader, games=games)
-actions = get_actions(loader=loader, games=games)
+players = get_players(loader=loader, games=games) ## problem with MLS2020?
+actions = get_actions(loader=loader, games=games) ## problem with MLS2020?
 actions_atomic = get_actions_atomic(loader=loader, games=games)
 gamestate_actions = get_gamestate_actions(loader=loader, games=games)
 x = get_x(loader=loader, games=games)
 x_atomic = get_x_atomic(loader=loader, games=games)
 y = get_y(loader=loader, games=games)
 y_atomic = get_y_atomic(loader=loader, games=games)
-xt = get_xt(gamestate_actions)
-
+xt = get_xt(gamestate_actions) 
 #%%

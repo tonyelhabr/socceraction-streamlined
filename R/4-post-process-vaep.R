@@ -267,3 +267,33 @@ export_parquet(vaep_by_player_season)
 #   ) |>
 #   ungroup() |>
 #   arrange(competition_id, season_id)
+
+vaep_by_player_season |> 
+  select(-in_test) |> 
+  group_split(season_id) |> 
+  walk(
+    ~{
+      path <- file.path('data/final/shared/', .x$season_id[1], 'vaep_by_player_season.csv')
+      dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+      readr::write_csv(.x,  path, na = '')
+    }
+  )
+players_season_games |> 
+  group_split(season_id) |> 
+  walk(
+    ~{
+      path <- file.path('data/final/shared/', .x$season_id[1], 'players_season_games.csv')
+      dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+      readr::write_csv(.x,  path, na = '')
+    }
+  )
+
+all_vaep |> 
+  group_split(season_id) |> 
+  walk(
+    ~{
+      path <- file.path('data/final/shared/', .x$season_id[1], 'events_with_vaep.parquet')
+      dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+      arrow::write_parquet(.x,  path)
+    }
+  )

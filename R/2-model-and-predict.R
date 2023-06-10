@@ -40,8 +40,8 @@ import_xy <- function(suffix = '', games) {
 }
 
 split_train_test <- function(df) {
-  game_ids_train <- games |> filter(season_id < TEST_SEASON_ID) |> pull(game_id)
-  game_ids_test <- games |> filter(season_id == TEST_SEASON_ID) |> pull(game_id)
+  game_ids_train <- games |> filter(!(season_id %in% TEST_SEASON_ID)) |> pull(game_id)
+  game_ids_test <- games |> filter(season_id %in% TEST_SEASON_ID) |> pull(game_id)
   train <- df |> filter(game_id %in% game_ids_train)
   test <- df |> filter(game_id %in% game_ids_test)
   list(
@@ -83,7 +83,7 @@ df_to_mat <- function(df) {
 
 fit_model <- function(split, target, atomic = TRUE, overwrite = FALSE) {
   suffix <- convert_atomic_bool_to_suffix(atomic)
-  path <- file.path(FINAL_DATA_DIR, paste0('model_', target, suffix, '.model'))
+  path <- file.path(MODEL_DIR, paste0('model_', target, suffix, '.model'))
   if (file.exists(path) & isFALSE(overwrite)) {
     return(xgboost::xgb.load(path))
   }
@@ -109,11 +109,11 @@ fit_models <- function(split, atomic = TRUE, overwrite = FALSE) {
   ) |> 
     set_names() |> 
     map(
-      ~{
+      function(.x) {
         fit_model(
           split, 
           target = .x,
-          atomic = atomic, 
+          atomic = atomic,
           overwrite = overwrite
         )
       }
@@ -136,6 +136,10 @@ predict_values <- function(fits, split, atomic = TRUE) {
       'test'
     ),
     ~{
+      ## if there is no train/test set
+      if (nrow( split[[.x]]) == 0) {
+        return(tibble())
+      }
       pred_scores <- tibble(
         !!col_scores := .predict_value(
           fit = fits$scores,
@@ -236,12 +240,12 @@ split_atomic <- split_train_test(xy_atomic)
 fits <- fit_models(
   split = split, 
   atomic = FALSE, 
-  overwrite = FALSE
+  overwrite = T
 )
 fits_atomic <- fit_models(
   split = split_atomic, 
   atomic = TRUE,
-  overwrite = FALSE
+  overwrite = T
 )
 
 preds <- predict_values(
@@ -255,19 +259,20 @@ preds_atomic <- predict_values(
   atomic = TRUE
 )
 
+export_parquet(preds)
+export_parquet(preds_atomic)
+
 contrib <- summarize_pred_contrib(
   fits = fits,
-  df = split$test,
+  df = split$train,
   atomic = FALSE
 )
 
 contrib_atomic <- summarize_pred_contrib(
   fits = fits_atomic,
-  df = split_atomic$test,
+  df = split_atomic$train,
   atomic = TRUE
 )
 
-export_parquet(preds)
-export_parquet(preds_atomic)
 export_parquet(contrib)
 export_parquet(contrib_atomic)
