@@ -9,6 +9,7 @@ library(forcats)
 
 source(file.path('R', 'helpers.R'))
 
+games <- import_parquet('games')
 xy_xg <- inner_join(
   import_parquet('y'),
   import_parquet('x') |> select(-matches('_a[2-9]$')),
@@ -32,9 +33,9 @@ xy_xg <- inner_join(
     across(c(scores, concedes), ~ifelse(.x, 'yes', 'no') |> factor()),
     across(where(is.logical), as.integer)
   )
-games <- import_parquet('games')
-game_ids_train <- games |> filter(season_id < TEST_SEASON_ID) |> pull(game_id)
-game_ids_test <- games |> filter(season_id == TEST_SEASON_ID) |> pull(game_id)
+
+game_ids_train <- games |> filter(!(season_id %in% TEST_SEASON_IDS)) |> pull(game_id)
+game_ids_test <- games |> filter(season_id %in% TEST_SEASON_IDS) |> pull(game_id)
 
 split <- list(
   train = xy_xg |> filter(game_id %in% game_ids_train), 

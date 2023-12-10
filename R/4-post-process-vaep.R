@@ -49,7 +49,14 @@ all_vaep <- ava |>
         period_id,
         team_id,
         player_id,
-        type_id,
+        nonatomic_type_id = type_id,
+        nonatomic_type_name = type_name,
+        type_id = case_when(
+          nonatomic_type_id %in% c(3L, 4L) ~ 32L, ## c('freekick_crossed', 'freekick_short') ~ 'freekick'
+          nonatomic_type_id %in% c(5L, 6L) ~ 31L, ## c('corner_crossed', 'corner_short') ~ 'corner'
+          nonatomic_type_id == 13L ~ 11L, ## 'shot_freekick' ~ 'shot'
+          TRUE ~ nonatomic_type_id
+        ),
         result_id,
         result_name,
         g = as.integer((type_name %in% c('shot', 'shot_freekick', 'shot_penalty')) & (result_name == 'success')),
@@ -89,6 +96,16 @@ all_vaep <- ava |>
 export_parquet(all_vaep)
 rm(list = c('av', 'ava', 'vaep', 'vaep_atomic'))
 
+## commpare to asa ----
+game_vaep <- all_vaep |> 
+  filter(
+    game_id == 1606686
+  )
+
+game_vaep |> filter(type_name == 'goal') |> glimpse()
+game_vaep |> filter(lead(type_name) == 'goal') |> glimpse()
+game_vaep |> filter(period_id == 1) |> count(time_seconds, sort = TRUE)
+
 ## debug ----
 player_games <- players |> 
   inner_join(
@@ -96,7 +113,23 @@ player_games <- players |>
     by = join_by(game_id)
   )
 
+## 2015 MLS has 3 missing games (couldn't create x data set due to missing player ids for non-non_action actions that require it)
+games_missing_vaep <- full_join(
+  player_games,
+  all_vaep |> distinct(season_id, player_id, game_id, has_vaep = TRUE)
+) |> 
+  mutate(
+    across(has_vaep, \(.x) coalesce(.x, FALSE))
+  ) |> 
+  count(season_id, game_id, has_vaep) |> 
+  filter(!has_vaep) |> 
+  filter(n >= 22)
+
 player_starting_positions <- player_games |> 
+  anti_join(
+    games_missing_vaep,
+    by = join_by(game_id)
+  ) |> 
   group_by(competition_id, season_id, player_id, starting_position) |> 
   summarize(
     across(minutes_played, sum)
@@ -269,6 +302,7 @@ export_parquet(vaep_by_player_season)
 #   arrange(competition_id, season_id)
 
 vaep_by_player_season |> 
+  filter(in_test) |> 
   select(-in_test) |> 
   group_split(season_id) |> 
   walk(
@@ -279,6 +313,7 @@ vaep_by_player_season |>
     }
   )
 players_season_games |> 
+  filter(season_id %in% TEST_SEASON_IDS) |> 
   group_split(season_id) |> 
   walk(
     ~{
@@ -289,6 +324,7 @@ players_season_games |>
   )
 
 all_vaep |> 
+  filter(season_id %in% TEST_SEASON_IDS) |> 
   group_split(season_id) |> 
   walk(
     ~{

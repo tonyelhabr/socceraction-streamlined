@@ -40,8 +40,8 @@ import_xy <- function(suffix = '', games) {
 }
 
 split_train_test <- function(df) {
-  game_ids_train <- games |> filter(!(season_id %in% TEST_SEASON_ID)) |> pull(game_id)
-  game_ids_test <- games |> filter(season_id %in% TEST_SEASON_ID) |> pull(game_id)
+  game_ids_train <- games |> filter(!(season_id %in% TEST_SEASON_IDS)) |> pull(game_id)
+  game_ids_test <- games |> filter(season_id %in% TEST_SEASON_IDS) |> pull(game_id)
   train <- df |> filter(game_id %in% game_ids_train)
   test <- df |> filter(game_id %in% game_ids_test)
   list(
@@ -171,7 +171,7 @@ predict_values <- function(fits, split, atomic = TRUE) {
         vaep 
       ) |>
         mutate(
-          in_test = season_id == TEST_SEASON_ID, 
+          in_test = season_id %in% TEST_SEASON_IDS, 
           .before = 1
         )
     }
@@ -240,12 +240,12 @@ split_atomic <- split_train_test(xy_atomic)
 fits <- fit_models(
   split = split, 
   atomic = FALSE, 
-  overwrite = T
+  overwrite = FALSE
 )
 fits_atomic <- fit_models(
   split = split_atomic, 
   atomic = TRUE,
-  overwrite = T
+  overwrite = FALSE
 )
 
 preds <- predict_values(
