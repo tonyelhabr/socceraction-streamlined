@@ -1,4 +1,5 @@
 #%%
+## use pip (pip install -r requirements.txt)
 import os
 import pickle
 import pandas as pd
@@ -17,8 +18,8 @@ import socceraction.xthreat as xthreat
 
 #%%
 ## globals
-COMPETITION_ID = 85
-SEASON_ID = 2015
+COMPETITION_ID = 8
+SEASON_ID = 2016
 ## 914834, 914899, 915139 in MLS 2015 have some issue with type_name
 RAW_DATA_DIR = f'../data/raw/'
 PROCESSED_DATA_DIR = f'../data/processed/{COMPETITION_ID}/{SEASON_ID}'
@@ -401,6 +402,8 @@ x_atomic = get_x_atomic(loader=loader, games=games_with_gamestate_actions)
 y = get_y(loader=loader, games=games_with_gamestate_actions)
 y_atomic = get_y_atomic(loader=loader, games=games_with_gamestate_actions)
 xt = get_xt(gamestate_actions) 
+
+
 #%%
 games.query('game_id == 915005').home_team_id
 
