@@ -9,47 +9,6 @@ library(forcats)
 
 source(file.path('R', 'helpers.R'))
 
-add_suffix <- function(prefix, suffix) {
-  sprintf('%s%s%s', prefix, ifelse(suffix != '', '_', ''), suffix)
-}
-
-import_xy <- function(suffix = '', games) {
-  inner_join(
-    import_parquet(add_suffix('y', suffix = suffix)),
-    import_parquet(add_suffix('x', suffix = suffix)) |> select(-matches('_a[1-2]$')),
-    by = join_by(game_id, action_id)
-  ) |> 
-    inner_join(
-      import_parquet(add_suffix('actions', suffix = suffix)) |>
-        select(
-          game_id,
-          team_id,
-          period_id,
-          action_id
-        ),
-      by = join_by(game_id, action_id)
-    ) |>
-    inner_join(
-      games |> select(competition_id, season_id, game_id),
-      by = join_by(game_id)
-    ) |> 
-    mutate(
-      across(c(scores, concedes), ~ifelse(.x, 'yes', 'no') |> factor()),
-      across(where(is.logical), as.integer)
-    )
-}
-
-split_train_test <- function(df) {
-  game_ids_train <- games |> filter(!(season_id %in% TEST_SEASON_IDS)) |> pull(game_id)
-  game_ids_test <- games |> filter(season_id %in% TEST_SEASON_IDS) |> pull(game_id)
-  train <- df |> filter(game_id %in% game_ids_train)
-  test <- df |> filter(game_id %in% game_ids_test)
-  list(
-    train = train, 
-    test = test
-  )
-}
-
 convert_atomic_bool_to_suffix <- function(atomic = TRUE) {
   ifelse(isTRUE(atomic), '_atomic', '')
 }
@@ -59,17 +18,6 @@ MODEL_COLS <- list(
   'non-atomic' = c('type_pass_a0', 'type_cross_a0', 'type_throw_in_a0', 'type_freekick_crossed_a0', 'type_freekick_short_a0', 'type_corner_crossed_a0', 'type_corner_short_a0', 'type_take_on_a0', 'type_foul_a0', 'type_tackle_a0', 'type_interception_a0', 'type_shot_a0', 'type_shot_penalty_a0', 'type_shot_freekick_a0', 'type_keeper_save_a0', 'type_keeper_claim_a0', 'type_keeper_punch_a0', 'type_keeper_pick_up_a0', 'type_clearance_a0', 'type_bad_touch_a0', 'type_non_action_a0', 'type_dribble_a0', 'type_goalkick_a0', 'bodypart_foot_a0', 'bodypart_head_a0', 'bodypart_other_a0', 'bodypart_head/other_a0', 'result_fail_a0', 'result_success_a0', 'result_offside_a0', 'result_owngoal_a0', 'result_yellow_card_a0', 'result_red_card_a0', 'goalscore_team', 'goalscore_opponent', 'goalscore_diff', 'start_x_a0', 'start_y_a0', 'end_x_a0', 'end_y_a0', 'dx_a0', 'dy_a0', 'movement_a0', 'start_dist_to_goal_a0', 'start_angle_to_goal_a0', 'end_dist_to_goal_a0', 'end_angle_to_goal_a0', 'period_id_a0', 'time_seconds_a0', 'time_seconds_overall_a0'),
   'atomic' = c('type_pass_a0', 'type_cross_a0', 'type_throw_in_a0', 'type_freekick_crossed_a0', 'type_freekick_short_a0', 'type_corner_crossed_a0', 'type_corner_short_a0', 'type_take_on_a0', 'type_foul_a0', 'type_tackle_a0', 'type_interception_a0', 'type_shot_a0', 'type_shot_penalty_a0', 'type_shot_freekick_a0', 'type_keeper_save_a0', 'type_keeper_claim_a0', 'type_keeper_punch_a0', 'type_keeper_pick_up_a0', 'type_clearance_a0', 'type_bad_touch_a0', 'type_non_action_a0', 'type_dribble_a0', 'type_goalkick_a0', 'type_receival_a0', 'type_out_a0', 'type_offside_a0', 'type_goal_a0', 'type_owngoal_a0', 'type_yellow_card_a0', 'type_red_card_a0', 'type_corner_a0', 'type_freekick_a0', 'bodypart_foot_a0', 'bodypart_head_a0', 'bodypart_other_a0', 'bodypart_head/other_a0', 'goalscore_team', 'goalscore_opponent', 'goalscore_diff', 'x_a0', 'y_a0', 'dist_to_goal_a0', 'angle_to_goal_a0', 'dx_a0', 'dy_a0', 'period_id_a0', 'time_seconds_a0', 'time_seconds_overall_a0')
 )
-
-df_to_mat <- function(df) {
-  model.matrix(
-    ~.+0,
-    data = model.frame(
-      ~.+0,
-      df,
-      na.action = na.pass
-    )
-  )
-}
 
 .select_x <- function(df, atomic = TRUE) {
   df |> 
@@ -120,12 +68,12 @@ fit_models <- function(split, atomic = TRUE, overwrite = FALSE) {
     )
 }
 
-.predict_value <- function(fit, df, atomic = TRUE, ...) {
-  x <- .select_x(df, atomic = atomic)
+.predict_value <- function(fit, df, atomic = TRUE, select_f, ...) {
+  x <- select_f(df, atomic = atomic)
   predict(fit, newdata = x, ...)
 }
 
-predict_values <- function(fits, split, atomic = TRUE) {
+predict_values <- function(fits, split, atomic = FALSE) {
   suffix <- convert_atomic_bool_to_suffix(atomic)
   col_scores <- sym(paste0('pred_scores', suffix, ''))
   col_concedes <- sym(paste0('pred_concedes', suffix, ''))
@@ -144,7 +92,8 @@ predict_values <- function(fits, split, atomic = TRUE) {
         !!col_scores := .predict_value(
           fit = fits$scores,
           df = split[[.x]],
-          atomic = atomic
+          atomic = atomic,
+          select_f = .select_x
         )
       )
       
@@ -152,7 +101,8 @@ predict_values <- function(fits, split, atomic = TRUE) {
         !!col_concedes := .predict_value(
           fit = fits$concedes,
           df = split[[.x]],
-          atomic = atomic
+          atomic = atomic,
+          select_f = .select_x
         )
       )
       
@@ -234,8 +184,8 @@ xy_atomic <- import_xy('atomic', games = games)
 # setdiff(colnames(xy), c(MODEL_COLS[['non-atomic']], MODEL_ID_COLS, c('scores', 'concedes', 'goal_from_shot')))
 # setdiff(colnames(xy_atomic), c(MODEL_COLS[['atomic']], MODEL_ID_COLS, c('scores', 'concedes', 'goal')))
 
-split <- split_train_test(xy)
-split_atomic <- split_train_test(xy_atomic)
+split <- split_train_test(xy, games = games)
+split_atomic <- split_train_test(xy_atomic, games = games)
 
 fits <- fit_models(
   split = split, 

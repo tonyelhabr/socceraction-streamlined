@@ -33,3 +33,55 @@ export_parquet <- function(df, name = deparse(substitute(df))) {
     file.path(FINAL_DATA_DIR, paste0(name, '.parquet'))
   )
 }
+
+add_suffix <- function(prefix, suffix) {
+  sprintf('%s%s%s', prefix, ifelse(suffix != '', '_', ''), suffix)
+}
+
+import_xy <- function(suffix = '', games) {
+  inner_join(
+    import_parquet(add_suffix('y', suffix = suffix)),
+    import_parquet(add_suffix('x', suffix = suffix)) |> select(-matches('_a[1-2]$')),
+    by = join_by(game_id, action_id)
+  ) |> 
+    inner_join(
+      import_parquet(add_suffix('actions', suffix = suffix)) |>
+        select(
+          game_id,
+          team_id,
+          period_id,
+          action_id
+        ),
+      by = join_by(game_id, action_id)
+    ) |>
+    inner_join(
+      games |> select(competition_id, season_id, game_id),
+      by = join_by(game_id)
+    ) |> 
+    mutate(
+      across(c(scores, concedes), ~ifelse(.x, 'yes', 'no') |> factor()),
+      across(where(is.logical), as.integer)
+    )
+}
+
+df_to_mat <- function(df) {
+  model.matrix(
+    ~.+0,
+    data = model.frame(
+      ~.+0,
+      df,
+      na.action = na.pass
+    )
+  )
+}
+
+split_train_test <- function(df, games) {
+  game_ids_train <- games |> filter(!(season_id %in% TEST_SEASON_IDS)) |> pull(game_id)
+  game_ids_test <- games |> filter(season_id %in% TEST_SEASON_IDS) |> pull(game_id)
+  train <- df |> filter(game_id %in% game_ids_train)
+  test <- df |> filter(game_id %in% game_ids_test)
+  list(
+    train = train, 
+    test = test
+  )
+}

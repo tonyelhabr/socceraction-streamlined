@@ -9,88 +9,104 @@ library(forcats)
 
 source(file.path('R', 'helpers.R'))
 
-games <- import_parquet('games')
-xy_xg <- inner_join(
-  import_parquet('y'),
-  import_parquet('x') |> select(-matches('_a[2-9]$')),
-  by = join_by(game_id, action_id)
-) |> 
-  inner_join(
-    import_parquet('actions') |>
-      select(
-        game_id,
-        team_id,
-        period_id,
-        action_id
-      ),
-    by = join_by(game_id, action_id)
-  ) |>
-  inner_join(
-    games |> select(competition_id, season_id, game_id),
-    by = join_by(game_id)
-  ) |> 
-  mutate(
-    across(c(scores, concedes), ~ifelse(.x, 'yes', 'no') |> factor()),
-    across(where(is.logical), as.integer)
-  )
-
-game_ids_train <- games |> filter(!(season_id %in% TEST_SEASON_IDS)) |> pull(game_id)
-game_ids_test <- games |> filter(season_id %in% TEST_SEASON_IDS) |> pull(game_id)
-
-split <- list(
-  train = xy_xg |> filter(game_id %in% game_ids_train), 
-  test = xy_xg |> filter(game_id %in% game_ids_test)
+XG_MODEL_ID_COLS <- c(
+  'start_x_a0',
+  'start_y_a0',
+  'start_dist_to_goal_a0',
+  'start_angle_to_goal_a0',
+  'bodypart_id_a0'
 )
 
-x_trn <- split$train |> 
-  select(
-    all_of(
-      c(
-        'type_pass_a1',
-        'type_cross_a1',
-        'type_throw_in_a1',
-        'type_freekick_crossed_a1',
-        'type_freekick_short_a1',
-        'type_corner_crossed_a1',
-        'type_corner_short_a1',
-        'type_take_on_a1',
-        'type_foul_a1',
-        'type_tackle_a1',
-        'type_interception_a1',
-        'type_shot_a1',
-        'type_shot_penalty_a1',
-        'type_shot_freekick_a1',
-        'type_keeper_save_a1',
-        'type_keeper_claim_a1',
-        'type_keeper_punch_a1',
-        'type_keeper_pick_up_a1',
-        'type_clearance_a1',
-        'type_bad_touch_a1',
-        'type_non_action_a1',
-        'type_dribble_a1',
-        'type_goalkick_a1',
-        'bodypart_foot_a0',
-        'bodypart_head_a0',
-        'bodypart_other_a0',
-        'bodypart_head/other_a0',
-        'bodypart_foot_a1',
-        'bodypart_head_a1',
-        'bodypart_other_a1',
-        'bodypart_head/other_a1',
-        'start_x_a0',
-        'start_y_a0',
-        'start_x_a1',
-        'start_y_a1',
-        'dx_a1',
-        'dy_a1',
-        'movement_a1',
-        'dx_a01',
-        'dy_a01',
-        'mov_a01',
-        'start_dist_to_goal_a0',
-        'start_angle_to_goal_a0',
-        'start_dist_to_goal_a1',
-        'start_angle_to_goal_a1'
+## https://github.com/ML-KULeuven/soccer_xg/blob/master/notebooks/4-creating-custom-xg-pipelines.ipynb
+.select_xg_x <- function(df) {
+  df |> 
+    transmute(
+      start_x_a0,
+      start_y_a0,
+      start_dist_to_goal_a0,
+      start_angle_to_goal_a0,
+      bodypart_id_a0 = case_when(
+        bodypart_foot_a0 == 1L ~ 0L,
+        bodypart_head_a0 == 1L ~ 1L,
+        bodypart_other_a0 == 1L ~ 2L,
+        `bodypart_head/other_a0` == 1L ~ 3L
       )
-    )
+    ) |> 
+    df_to_mat()
+}
+
+fit_xg_model <- function(split, overwrite = FALSE) {
+  path <- file.path(MODEL_DIR, paste0('model_xg.model'))
+  if (file.exists(path) & isFALSE(overwrite)) {
+    return(xgboost::xgb.load(path))
+  }
+  x <- .select_xg_x(split$train)
+  y <- as.integer(split$train$scores) - 1L
+  fit <- xgboost::xgboost(
+    data = x,
+    label = y,
+    eval_metric = 'logloss',
+    early_stopping_round = 10,
+    nrounds = 500,
+    print_every_n = 10,
+    max_depth = 3, 
+    n_jobs = -3
   )
+  xgboost::xgb.save(fit, path)
+  fit
+}
+
+.predict_xg <- function(fit, df, ...) {
+  x <- .select_xg_x(df)
+  predict(fit, newdata = x, ...)
+}
+
+predict_xg <- function(fits, split, atomic = TRUE) {
+  col_scores <- sym(paste0('pred_scores', suffix, ''))
+  map_dfr(
+    c(
+      'train',
+      'test'
+    ),
+    ~{
+      ## if there is no train/test set
+      if (nrow( split[[.x]]) == 0) {
+        return(tibble())
+      }
+      pred <- tibble(
+        !!col_scores := .predict_xg(
+          fit = fits,
+          df = split[[.x]]
+        )
+      )
+      
+      actual <- bind_cols(
+        split[[.x]] |> select(scores),
+        pred_scores
+      )
+      
+      bind_cols(
+        split[[.x]] |> select(all_of(XG_MODEL_ID_COLS)),
+        vaep 
+      ) |>
+        mutate(
+          in_test = season_id %in% TEST_SEASON_IDS, 
+          .before = 1
+        )
+    }
+  )
+}
+
+## main ----
+games <- import_parquet('games')
+xy <- import_xy(games = games)
+open_play_shots <- filter(
+  xy,
+  type_shot_a0 == 1
+)
+split <- split_train_test(open_play_shots, games = games)
+
+# xg_model <- fit_xg_model(
+#   split = split,
+#   overwrite = TRUE
+# )
