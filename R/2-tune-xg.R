@@ -64,9 +64,11 @@ grid <- grid_latin_hypercube(
   size = 50
 )
 
-wf <- workflow() |> 
-  add_model(spec) |> 
-  add_recipe(rec)
+wf_sets <- workflow_set(
+  preproc = list(rec = rec),
+  models = list(model = spec),
+  cross = TRUE
+)
 
 met_set <- metric_set(f_meas, accuracy, roc_auc, mn_log_loss, brier_class)
 control <- control_race(
@@ -76,8 +78,9 @@ control <- control_race(
 )
 
 options(tidymodels.dark = TRUE)
-tuned_results <- tune_race_anova(
-  wf,
+tuned_results <- workflow_map(
+  wf_sets,
+  fn = 'tune_race_anova',
   grid = grid,
   control = control,
   metrics = met_set,
@@ -89,7 +92,7 @@ autoplot(tuned_results)
 perf_stats <- map_dfr(
   c('f_meas', 'accuracy', 'roc_auc', 'mn_log_loss', 'brier_class'),
   \(.x) {
-    rank_results(tuned_model, rank_metric = .x, select_best = TRUE) |> 
+    rank_results(tuned_results, rank_metric = .x, select_best = TRUE) |> 
       filter(.metric == .x)
   }
 )
@@ -97,3 +100,12 @@ perf_stats <- map_dfr(
 rank_results(tuned_results, rank_metric = 'f_meas') |>
   select(.config, .metric, mean, std_err) |>
   filter(.metric == 'f_meas')
+
+best_set <- tuned_results |>
+  extract_workflow_set_result('rec_model') %>% 
+  select_best(metric = 'f_meas')
+best_set
+
+final_fit <- tuned_results %>%
+  extract_workflow('rec_model') %>%
+  finalize_workflow(best_set) 
