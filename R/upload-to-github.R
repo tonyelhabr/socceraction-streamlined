@@ -32,7 +32,7 @@ upload_to_github <- function(x) {
 }
 
 c(
-  # 'actions',
+  'actions',
   'actions_atomic',
   'actiontypes',
   'actiontypes_atomic',
