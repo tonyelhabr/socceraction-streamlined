@@ -1,11 +1,5 @@
 library(dplyr)
-library(tidyr)
-library(readr)
 library(xgboost)
-library(purrr)
-library(rlang)
-library(withr)
-library(forcats)
 
 source(file.path('R', 'helpers.R'))
 
@@ -20,7 +14,7 @@ XG_MODEL_ID_COLS <- c(
 ## https://github.com/ML-KULeuven/soccer_xg/blob/master/notebooks/4-creating-custom-xg-pipelines.ipynb
 .select_xg_x <- function(df) {
   df |> 
-    transmute(
+    dplyr::transmute(
       start_x_a0,
       start_y_a0,
       start_dist_to_goal_a0,
@@ -71,25 +65,25 @@ predict_xg <- function(fits, split, atomic = TRUE) {
     ~{
       ## if there is no train/test set
       if (nrow( split[[.x]]) == 0) {
-        return(tibble())
+        return(tibble::tibble())
       }
-      pred <- tibble(
+      pred <- tibble::tibble(
         !!col_scores := .predict_xg(
           fit = fits,
           df = split[[.x]]
         )
       )
       
-      actual <- bind_cols(
-        split[[.x]] |> select(scores),
+      actual <- dplyr::bind_cols(
+        split[[.x]] |> dplyr::select(scores),
         pred_scores
       )
       
-      bind_cols(
-        split[[.x]] |> select(all_of(XG_MODEL_ID_COLS)),
+      dplyr::bind_cols(
+        split[[.x]] |> dplyr::select(dplyr::all_of(XG_MODEL_ID_COLS)),
         vaep 
       ) |>
-        mutate(
+        dplyr::mutate(
           in_test = season_id %in% TEST_SEASON_IDS, 
           .before = 1
         )
@@ -100,7 +94,7 @@ predict_xg <- function(fits, split, atomic = TRUE) {
 ## main ----
 games <- import_parquet('games')
 xy <- import_xy(games = games)
-open_play_shots <- filter(
+open_play_shots <- dplyr::filter(
   xy,
   type_shot_a0 == 1
 )
