@@ -171,6 +171,7 @@ tuned_results <- workflow_map(
 )
 t2 <- Sys.time()
 t2 - t1
+
 autoplot(tuned_results)
 
 perf_stats <- map_dfr(
@@ -212,19 +213,18 @@ tuned_results |>
 best_base_set <- tuned_results |>
   extract_workflow_set_result('base_model') |> 
   select_best(metric = 'f_meas')
-best_base_set
-# | mtry| min_n| tree_depth| loss_reduction| sample_size| stop_iter|.config               |
-# |----:|-----:|----------:|--------------:|-----------:|---------:|:---------------------|
-# |   10|     8|         13|              0|         0.8|        42|Preprocessor1_Model16 |
+knitr::kable(best_base_set)
+#   | mtry| min_n| tree_depth| loss_reduction| sample_size| stop_iter|.config               |
+#   |----:|-----:|----------:|--------------:|-----------:|---------:|:---------------------|
+#   |   11|    20|         12|      0.0009316|   0.2373513|        36|Preprocessor1_Model31 |
 
 best_elo_set <- tuned_results |>
   extract_workflow_set_result('elo_model') |> 
   select_best(metric = 'f_meas')
-best_elo_set
-# | mtry| min_n| tree_depth| loss_reduction| sample_size| stop_iter|.config               |
-# |----:|-----:|----------:|--------------:|-----------:|---------:|:---------------------|
-# |   10|     8|         13|              0|         0.8|        42|Preprocessor1_Model16 |
-
+knitr::kable(best_elo_set)
+#   | mtry| min_n| tree_depth| loss_reduction| sample_size| stop_iter|.config               |
+#   |----:|-----:|----------:|--------------:|-----------:|---------:|:---------------------|
+#   |   12|    31|         13|      0.0006153|   0.3222589|        47|Preprocessor1_Model34 |
 
 tuned_results |>
   extract_workflow_set_result('base_model') |>
@@ -294,9 +294,13 @@ final_elo_fit |>
 
 elo_model_object <- extract_fit_engine(final_elo_fit)
 
+set.seed(42)
+sampled_open_play_shots <- open_play_shots |> 
+  slice_sample(n = 10000)
+
 fitted_data <- rec_elo |>
   prep() |>
-  bake(new_data = open_play_shots) |>
+  bake(new_data = sampled_open_play_shots) |>
   select(-scores)
 
 plan(multisession, workers = 4)
@@ -378,8 +382,9 @@ res <- partial(
   elo_model_object,
   train = fitted_data,
   pred.var = 'elo',
+  # pred.fun = function(object, newdata) { predict(object, newdata) },
   type = 'classification',
-  ice = TRUE,
+  ice = FALSE,
   plot = TRUE,
   prob = TRUE,
   trim.outliers = TRUE
