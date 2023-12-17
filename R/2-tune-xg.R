@@ -10,6 +10,9 @@ library(vip)
 library(pdp)
 library(ggplot2)
 library(scales)
+library(pdp)
+library(furrr)
+library(future)
 
 source(file.path('R', 'helpers.R'))
 
@@ -167,7 +170,7 @@ tuned_results <- workflow_map(
 autoplot(tuned_results)
 
 perf_stats <- map_dfr(
-  c('f_meas', 'accuracy', 'roc_auc', 'mn_log_loss'),
+  c('f_meas', 'accuracy', 'roc_auc', 'sensitivity'),
   \(.x) {
     rank_results(tuned_results, rank_metric = .x, select_best = TRUE) |> 
       filter(.metric == .x)
@@ -206,19 +209,31 @@ best_base_set <- tuned_results |>
   extract_workflow_set_result('base_model') |> 
   select_best(metric = 'f_meas')
 best_base_set
+# | mtry| min_n| tree_depth| loss_reduction| sample_size| stop_iter|.config               |
+# |----:|-----:|----------:|--------------:|-----------:|---------:|:---------------------|
+# |   10|     8|         13|              0|         0.8|        42|Preprocessor1_Model16 |
 
 best_elo_set <- tuned_results |>
   extract_workflow_set_result('elo_model') |> 
   select_best(metric = 'f_meas')
 best_elo_set
+# | mtry| min_n| tree_depth| loss_reduction| sample_size| stop_iter|.config               |
+# |----:|-----:|----------:|--------------:|-----------:|---------:|:---------------------|
+# |   10|     8|         13|              0|         0.8|        42|Preprocessor1_Model16 |
 
-# tuned_results |>
-#   extract_workflow_set_result('base_model') |> 
-#   plot_race()
-# 
-# tuned_results |>
-#   extract_workflow_set_result('elo_model') |> 
-#   plot_race()
+
+tuned_results |>
+  extract_workflow_set_result('base_model') |>
+  plot_race()
+
+tuned_results |>
+  extract_workflow_set_result('elo_model') |>
+  plot_race()
+
+tuned_results |>
+  extract_workflow_set_result('elo_model') |> 
+  # collect_metrics()
+  autoplot()
 
 final_base_fit <- tuned_results |>
   extract_workflow('base_model') |>
@@ -256,32 +271,112 @@ final_base_fit |>
   conf_mat(scores, .pred_class) |>
   autoplot(type = 'heatmap')
 
-library(vip)
-
 final_base_fit |> 
   extract_fit_parsnip() |>
-  vip(geom = 'point', include_type = TRUE) + 
+  vip(geom = 'point', include_type = TRUE, num_features = 100) + 
   geom_text(
     aes(label = scales::percent(Importance, accuracy = 1)),
     nudge_y = 0.02
   )
-
-library(vip)
 
 final_elo_fit |> 
   extract_fit_parsnip() |>
-  vip(geom = 'point', include_type = TRUE) + 
+  vip(geom = 'point', include_type = TRUE, num_features = 100) + 
   geom_text(
     aes(label = scales::percent(Importance, accuracy = 1)),
     nudge_y = 0.02
   )
 
-library(pdp)
 
-##Get Processed Training Data
-model_object <- extract_fit_engine(final_fit)
+elo_model_object <- extract_fit_engine(final_elo_fit)
 
-fitted_data <- rec_smote %>%
-  prep() %>%
-  bake(new_data = model_data) %>%
-  select(-is_iced)
+fitted_data <- rec_elo |>
+  prep() |>
+  bake(new_data = open_play_shots) |>
+  select(-scores)
+
+plan(multisession, workers = 4)
+
+elo_pdp <- future_map_dfr(
+  names(fitted_data), 
+  \(.x) {
+    res <- partial(
+      elo_model_object,
+      train = fitted_data,
+      pred.var = .x,
+      type = 'classification',
+      plot = FALSE,
+      prob = TRUE, #Converts model output to probability scale
+      trim.outliers = TRUE
+    )
+    
+    res |> 
+      as_tibble() |> 
+      mutate(var = .x) |>
+      rename(value = all_of(.x))
+  },
+  .progress = TRUE,
+  .options = furrr_options(seed = 42)
+)
+
+elo_ice <- future_map_dfr(
+  names(fitted_data), 
+  \(.x) {
+    res <- partial(
+      elo_model_object,
+      train = fitted_data,
+      pred.var = .x,
+      type = 'classification',
+      ice = TRUE,
+      plot = FALSE,
+      prob = TRUE, #Converts model output to probability scale
+      trim.outliers = TRUE
+    )
+    
+    res |> 
+      as_tibble() |> 
+      mutate(var = .x) |>
+      rename(value = all_of(.x))
+  },
+  .progress = TRUE,
+  .options = furrr_options(seed = 42)
+)
+plan(sequential)
+
+
+
+elo_pdp |> 
+  ggplot() + 
+  aes(
+    x = value, 
+    y = yhat
+  ) +
+  geom_line() + 
+  geom_smooth(se = FALSE, lty = 2, span = 0.5) + 
+  facet_wrap(~var, scales = 'free')
+
+elo_ice |> 
+  ggplot() + 
+  aes(
+    x = value, 
+    y = yhat,
+  ) +
+  geom_line(
+    aes(
+      group = yhat.id
+    )
+  ) + 
+  geom_smooth(se = FALSE, lty = 2, span = 0.5) + 
+  facet_wrap(~var, scales = 'free') 
+
+
+res <- partial(
+  elo_model_object,
+  train = fitted_data,
+  pred.var = 'elo',
+  type = 'classification',
+  ice = TRUE,
+  plot = TRUE,
+  prob = TRUE, #Converts model output to probability scale
+  trim.outliers = TRUE
+)
