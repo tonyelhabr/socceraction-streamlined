@@ -5,6 +5,7 @@ library(tidymodels)
 library(finetune)
 library(bonsai)
 library(themis)
+library(lightgbm)
 
 library(vip)
 library(pdp)
@@ -47,6 +48,7 @@ open_play_shots <- xy |>
     opponent_team_id = ifelse(team_id == home_team_id, away_team_id, home_team_id),
     elo = ifelse(team_id == home_team_id, home_elo, away_elo),
     opponent_elo = ifelse(team_id == home_elo, away_elo, home_elo),
+    elo_diff = elo - opponent_elo,
     start_x_a0,
     start_y_a0,
     start_dist_to_goal_a0,
@@ -91,7 +93,7 @@ rec_base <- recipe(
 rec_elo <- recipe(
   scores ~ 
     elo +
-    opponent_elo +
+    elo_diff +
     start_x_a0 +
     start_y_a0 +
     start_dist_to_goal_a0 +
@@ -123,7 +125,7 @@ spec <- boost_tree(
   mtry = tune(),
   stop_iter = tune()
 ) |>
-  set_engine('xgboost') |> 
+  set_engine('lightgbm') |> 
   set_mode('classification')
 
 grid <- grid_latin_hypercube(
@@ -157,6 +159,7 @@ control <- control_race(
 )
 
 options(tidymodels.dark = TRUE)
+t1 <- Sys.time()
 tuned_results <- workflow_map(
   wf_sets,
   fn = 'tune_race_anova',
@@ -166,7 +169,8 @@ tuned_results <- workflow_map(
   resamples = train_folds,
   seed = 42
 )
-
+t2 <- Sys.time()
+t2 - t1
 autoplot(tuned_results)
 
 perf_stats <- map_dfr(
@@ -306,7 +310,7 @@ elo_pdp <- future_map_dfr(
       pred.var = .x,
       type = 'classification',
       plot = FALSE,
-      prob = TRUE, #Converts model output to probability scale
+      prob = TRUE,
       trim.outliers = TRUE
     )
     
@@ -329,7 +333,7 @@ elo_ice <- future_map_dfr(
       type = 'classification',
       ice = TRUE,
       plot = FALSE,
-      prob = TRUE, #Converts model output to probability scale
+      prob = TRUE,
       trim.outliers = TRUE
     )
     
@@ -377,6 +381,6 @@ res <- partial(
   type = 'classification',
   ice = TRUE,
   plot = TRUE,
-  prob = TRUE, #Converts model output to probability scale
+  prob = TRUE,
   trim.outliers = TRUE
 )
