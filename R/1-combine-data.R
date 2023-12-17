@@ -18,6 +18,7 @@ do_import_parquets <- function(x, assign = TRUE) {
       season_end_year <- as.integer(basename(dirname(.x)))
       read_parquet(.x) |> 
         mutate(
+          # season = season_end_year,
           across(
             where(~any(class(.x) == 'integer64')),
             as.double
