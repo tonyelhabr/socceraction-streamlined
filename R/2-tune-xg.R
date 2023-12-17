@@ -2,7 +2,7 @@ library(dplyr)
 library(lubridate)
 library(tidymodels)
 library(finetune)
-# library(lightgbm)
+library(lightgbm)
 library(bonsai)
 library(themis)
 
@@ -33,7 +33,7 @@ open_play_shots <- xy |>
     by = dplyr::join_by(date, away_team_id)
   ) |> 
   dplyr::transmute(
-    scores,
+    scores = factor(scores, levels = c('yes', 'no')),
     game_id,
     team_id,
     opponent_team_id = ifelse(team_id == home_team_id, away_team_id, home_team_id),
@@ -43,18 +43,19 @@ open_play_shots <- xy |>
     start_y_a0,
     start_dist_to_goal_a0,
     start_angle_to_goal_a0,
-    # type_pass_a1,
-    # type_cross_a1,
-    # type_dribble_a1,
-    # type_shot_a1,
+    type_pass_a1,
+    type_cross_a1,
+    type_dribble_a1,
+    type_shot_a1,
     bodypart_foot_a0,
     bodypart_head_a0,
     bodypart_other_a0
   )
 
-split <- split_train_test(open_play_shots, games = games)
-train <- split$train
-test <- split$test
+init_split <- split_train_test(open_play_shots, games = games)
+split <- make_splits(init_split$train, init_split$test)
+train <- training(split)
+test <- testing(split)
 
 set.seed(42)
 train_folds <- vfold_cv(train, strata = scores, v = 5)
@@ -96,7 +97,6 @@ rec_elo <- recipe(
 
 rec_smote <- rec_base |> 
   step_smote(all_outcomes())
-
 
 ## https://jlaw.netlify.app/2022/01/24/predicting-when-kickers-get-iced-with-tidymodels/
 ## https://juliasilge.com/blog/childcare-costs/
@@ -158,6 +158,7 @@ tuned_results <- workflow_map(
 )
 
 autoplot(tuned_results)
+plot_race(tuned_results)
 
 perf_stats <- map_dfr(
   c('f_meas', 'accuracy', 'roc_auc', 'mn_log_loss'),
@@ -171,11 +172,110 @@ rank_results(tuned_results, rank_metric = 'f_meas') |>
   select(.config, .metric, mean, std_err) |>
   filter(.metric == 'f_meas')
 
-best_set <- tuned_results |>
-  extract_workflow_set_result('rec_model') %>% 
-  select_best(metric = 'f_meas')
-best_set
+perf_stats |> 
+  ggplot() +
+  aes(x = wflow_id, color = wflow_id, y = mean) +
+  geom_pointrange(
+    aes(
+      y = mean, 
+      ymin = mean - 1.96*std_err, 
+      ymax = mean + 1.96*std_err
+    )
+  ) + 
+  facet_wrap(~.metric, scales = 'free_y') + 
+  guides(color = 'none') +
+  labs(
+    title = 'Performance Metric for Tuned Results',
+    x = 'Model Spec',
+    y = 'Metric Value',
+    color = 'Model Config'
+  )
 
-final_fit <- tuned_results %>%
-  extract_workflow('rec_model') %>%
-  finalize_workflow(best_set) 
+tuned_results |> 
+  rank_results(rank_metric = 'f_meas') |>
+  select(wflow_id, .config, .metric, mean, std_err) |>
+  filter(.metric == 'f_meas') 
+
+best_base_set <- tuned_results |>
+  extract_workflow_set_result('base_model') |> 
+  select_best(metric = 'f_meas')
+best_base_set
+
+best_elo_set <- tuned_results |>
+  extract_workflow_set_result('elo_model') |> 
+  select_best(metric = 'f_meas')
+best_elo_set
+
+# tuned_results |>
+#   extract_workflow_set_result('base_model') |> 
+#   plot_race()
+# 
+# tuned_results |>
+#   extract_workflow_set_result('elo_model') |> 
+#   plot_race()
+
+final_base_fit <- tuned_results |>
+  extract_workflow('base_model') |>
+  finalize_workflow(best_base_set) |> 
+  last_fit(
+    split,
+    metrics = met_set
+  )
+
+final_elo_fit <- tuned_results |>
+  extract_workflow('elo_model') |>
+  finalize_workflow(best_elo_set) |> 
+  last_fit(
+    split,
+    metrics = met_set
+  )
+
+collect_metrics(final_base_fit)
+collect_metrics(final_elo_fit)
+
+final_base_fit |> 
+  collect_predictions() |>
+  roc_curve(scores, .pred_yes) |>
+  ggplot() +
+  aes(
+    x = 1 - specificity, 
+    y = sensitivity
+  ) +
+  geom_abline(lty = 2, linewidth = 1.5) +
+  geom_point() +
+  coord_equal()
+
+final_base_fit |> 
+  collect_predictions() |>
+  conf_mat(scores, .pred_class) |>
+  autoplot(type = 'heatmap')
+
+library(vip)
+
+final_base_fit |> 
+  extract_fit_parsnip() |>
+  vip(geom = 'point', include_type = TRUE) + 
+  geom_text(
+    aes(label = scales::percent(Importance, accuracy = 1)),
+    nudge_y = 0.02
+  )
+
+library(vip)
+
+final_elo_fit |> 
+  extract_fit_parsnip() |>
+  vip(geom = 'point', include_type = TRUE) + 
+  geom_text(
+    aes(label = scales::percent(Importance, accuracy = 1)),
+    nudge_y = 0.02
+  )
+
+library(pdp)
+
+##Get Processed Training Data
+model_object <- extract_fit_engine(final_fit)
+
+fitted_data <- rec_smote %>%
+  prep() %>%
+  bake(new_data = model_data) %>%
+  select(-is_iced)
