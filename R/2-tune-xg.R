@@ -1,10 +1,15 @@
 library(dplyr)
 library(lubridate)
+
 library(tidymodels)
 library(finetune)
-library(lightgbm)
 library(bonsai)
 library(themis)
+
+library(vip)
+library(pdp)
+library(ggplot2)
+library(scales)
 
 source(file.path('R', 'helpers.R'))
 
@@ -43,10 +48,12 @@ open_play_shots <- xy |>
     start_y_a0,
     start_dist_to_goal_a0,
     start_angle_to_goal_a0,
+    type_dribble_a1,
     type_pass_a1,
     type_cross_a1,
-    type_dribble_a1,
+    type_corner_crossed_a1,
     type_shot_a1,
+    type_freekick_crossed_a1,
     bodypart_foot_a0,
     bodypart_head_a0,
     bodypart_other_a0
@@ -66,10 +73,12 @@ rec_base <- recipe(
     start_y_a0 +
     start_dist_to_goal_a0 +
     start_angle_to_goal_a0 +
-    # type_pass_a1 +
-    # type_cross_a1 +
-    # type_dribble_a1 +
-    # type_shot_a1 +
+    type_dribble_a1 +
+    type_pass_a1 +
+    type_cross_a1 +
+    type_corner_crossed_a1 +
+    type_shot_a1 +
+    type_freekick_crossed_a1 +
     bodypart_foot_a0 +
     bodypart_head_a0 +
     bodypart_other_a0,
@@ -84,10 +93,12 @@ rec_elo <- recipe(
     start_y_a0 +
     start_dist_to_goal_a0 +
     start_angle_to_goal_a0 +
-    # type_pass_a1 +
-    # type_cross_a1 +
-    # type_dribble_a1 +
-    # type_shot_a1 +
+    type_dribble_a1 +
+    type_pass_a1 +
+    type_cross_a1 +
+    type_corner_crossed_a1 +
+    type_shot_a1 +
+    type_freekick_crossed_a1 +
     bodypart_foot_a0 +
     bodypart_head_a0 +
     bodypart_other_a0,
@@ -95,15 +106,12 @@ rec_elo <- recipe(
 )
 
 
-rec_smote <- rec_base |> 
-  step_smote(all_outcomes())
-
 ## https://jlaw.netlify.app/2022/01/24/predicting-when-kickers-get-iced-with-tidymodels/
 ## https://juliasilge.com/blog/childcare-costs/
 spec <- boost_tree(
   # trees = tune(),
   # learn_rate = tune(),
-  trees = 300,
+  trees = 500,
   learn_rate = 0.01,
   tree_depth = tune(),
   min_n = tune(), 
@@ -124,20 +132,19 @@ grid <- grid_latin_hypercube(
   sample_size = sample_prop(),
   finalize(mtry(), train),
   stop_iter(range = c(10L, 50L)),
-  size = 20
+  size = 50
 )
 
 wf_sets <- workflow_set(
   preproc = list(
     base = rec_base, 
     elo = rec_elo
-    # smote = rec_smote
   ),
   models = list(model = spec),
   cross = TRUE
 )
 
-met_set <- metric_set(f_meas, accuracy, roc_auc, mn_log_loss)
+met_set <- metric_set(f_meas, accuracy, roc_auc, sensitivity)
 control <- control_race(
   save_pred = TRUE,
   parallel_over = 'everything',
@@ -158,7 +165,6 @@ tuned_results <- workflow_map(
 )
 
 autoplot(tuned_results)
-plot_race(tuned_results)
 
 perf_stats <- map_dfr(
   c('f_meas', 'accuracy', 'roc_auc', 'mn_log_loss'),
