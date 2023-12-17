@@ -38,10 +38,10 @@ add_suffix <- function(prefix, suffix) {
   sprintf('%s%s%s', prefix, ifelse(suffix != '', '_', ''), suffix)
 }
 
-import_xy <- function(suffix = '', games) {
+import_xy <- function(suffix = '', games, drop_action_regex = '_a[1-2]$') {
   inner_join(
     import_parquet(add_suffix('y', suffix = suffix)),
-    import_parquet(add_suffix('x', suffix = suffix)) |> select(-matches('_a[1-2]$')),
+    import_parquet(add_suffix('x', suffix = suffix)) |> select(-matches(drop_action_regex)),
     by = join_by(game_id, action_id)
   ) |> 
     inner_join(
