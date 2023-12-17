@@ -44,3 +44,12 @@ c(
   'xt'
 ) |> 
   walk(upload_to_github)
+
+c(
+  'x',
+  'x_atomic',
+  'y',
+  'y_atomic'
+) |> 
+  walk(upload_to_github)
+
