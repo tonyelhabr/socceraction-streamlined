@@ -8,7 +8,7 @@ pb_new_release(
 upload_to_github <- function(x) {
   
   paths <- dir_ls(
-    file.path(PROCESSED_DATA_DIR, COMPETITION_ID, SEASON_END_YEARS),
+    file.path(PROCESSED_DATA_DIR, COMPETITION_ID, 2020),
     regexp = paste0('\\/', x, '\\.parquet$'),
     recurse = TRUE
   )
@@ -41,15 +41,12 @@ c(
   'players',
   'results',
   'teams',
-  'xt'
-) |> 
-  walk(upload_to_github)
-
-c(
+  'xt',
   'x',
   'x_atomic',
   'y',
   'y_atomic'
 ) |> 
   walk(upload_to_github)
+
 
