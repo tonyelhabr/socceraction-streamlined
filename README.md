@@ -53,7 +53,3 @@ More on `concept`:
 -   `x` and `y` include the lagged features of the prior 2 actions.
 
 Note that, on local, files are nested in sub-directories, e.g. `{PROCESSED_DATA_DIR}/{league_id}/{season_id}/{concept}.parquet`. Because GitHub releases don't have something equivalent to sub-directories, string concatenation is used.
-
-### Models
-
-Model files that are the output of `R/2-model-and-predict.R` are stored in the GitHub repo itself at `{FINAL_DATA_DIR}/{league_id}/{first_season_id}-{last_season_id}/`, where `{first_season_id}` and `{last_season_id}` represent the range of seasons used to train the model. For VAEP, there are two models `model_scores.model` and `model_concedes.model`. See the [VAEP paper](https://arxiv.org/pdf/1802.07127.pdf) for an explanation of the need for two models.
