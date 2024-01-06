@@ -1,3 +1,5 @@
-*
+**/*.parquet
+**/*.csv
+**/*.model
 !.gitignore
-!*.model
+!clubelo-ratings.parquet
